@@ -12,8 +12,8 @@ namespace NovelViewer;
 
 public partial class MainWindow : Window
 {
-    private const double PageWidth = 820;
-    private const double PageHeight = 1120;
+    private double _pageWidth = 820;
+    private double _pageHeight = 1120;
 
     private readonly List<ComicPanel> _panels = new();
     private ComicPanel? _selectedPanel;
@@ -35,6 +35,11 @@ public partial class MainWindow : Window
     private int _currentPageIndex;
     private string? _projectBaseDirectory;
     private System.Windows.Shapes.Path? _pageBubbleOutlinePath;
+    // 꼬리 편집용 세 점 핸들은 칸 경계 클리핑을 피하기 위해 페이지 레이어(PageOverlay)에
+    // 올려 두는 싱글톤이다. 선택된 말풍선의 선택된 꼬리에만 표시된다.
+    private Thumb? _tailStartHandle;
+    private Thumb? _tailMidHandle;
+    private Thumb? _tailEndHandle;
     private readonly string _windowSettingsPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "NovelViewer",
@@ -46,7 +51,8 @@ public partial class MainWindow : Window
         LoadWindowSettings();
         Closing += (_, _) => SaveWindowSettings();
         PreviewKeyDown += MainWindow_PreviewKeyDown;
-        CreateLayoutFromPattern("1,2,1");
+        // 저장된 기본 칸 구성(없으면 입력칸 기본값)으로 첫 페이지를 생성한다.
+        CreateLayoutFromPattern(LayoutPatternTextBox.Text);
         _pages.Add(CaptureCurrentPage("Page 1"));
         UpdatePageList();
         UpdateInspectorLabels();
@@ -97,7 +103,12 @@ public partial class MainWindow : Window
             {
                 MoveSelectedPanel(direction);
                 e.Handled = true;
+                return;
             }
+
+            // 선택된 것이 없으면 위/아래 키로 페이지를 넘긴다.
+            NavigatePage(direction);
+            e.Handled = true;
         }
     }
 
@@ -122,11 +133,14 @@ public partial class MainWindow : Window
     private void AddPage_Click(object sender, RoutedEventArgs e)
     {
         SaveCurrentPageState();
-        _pages.Add(new ComicPageData { Name = $"Page {_pages.Count + 1}" });
+        _pages.Add(new ComicPageData { Name = $"Page {_pages.Count + 1}", PageWidth = _pageWidth, PageHeight = _pageHeight });
         _currentPageIndex = _pages.Count - 1;
         LoadPage(_pages[_currentPageIndex]);
+        // 새 페이지를 기본 칸 구성으로 자동 채운다(패턴이 비어 있으면 빈 페이지 유지).
+        CreateLayoutFromPattern(LayoutPatternTextBox.Text);
+        ClearSelection();
         UpdatePageList();
-        UpdateStatus("새 페이지를 추가했습니다.");
+        UpdateStatus("새 페이지를 기본 칸 구성으로 추가했습니다.");
     }
 
     private void DeletePage_Click(object sender, RoutedEventArgs e)
@@ -144,6 +158,209 @@ public partial class MainWindow : Window
         UpdateStatus("페이지를 삭제했습니다.");
     }
 
+    private void MovePageUp_Click(object sender, RoutedEventArgs e)
+    {
+        MoveCurrentPage(-1);
+    }
+
+    private void MovePageDown_Click(object sender, RoutedEventArgs e)
+    {
+        MoveCurrentPage(1);
+    }
+
+    private void MoveCurrentPage(int direction)
+    {
+        var target = _currentPageIndex + direction;
+        if (_currentPageIndex < 0 || target < 0 || target >= _pages.Count)
+        {
+            return;
+        }
+
+        // 현재 편집 내용을 페이지 데이터에 반영한 뒤 위치만 교환한다(표시 중인 페이지는 그대로).
+        SaveCurrentPageState();
+        (_pages[_currentPageIndex], _pages[target]) = (_pages[target], _pages[_currentPageIndex]);
+        _currentPageIndex = target;
+        UpdatePageList();
+        UpdateStatus("페이지 순서를 옮겼습니다.");
+    }
+
+    private void PageSizeTextBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_isLoadingInspector ||
+            PageWidthTextBox == null ||
+            PageHeightTextBox == null ||
+            PageSurface == null ||
+            !double.TryParse(PageWidthTextBox.Text, out var width) ||
+            !double.TryParse(PageHeightTextBox.Text, out var height))
+        {
+            return;
+        }
+
+        // 페이지 크기는 페이지마다 개별 적용된다. 입력 즉시 현재 페이지에 반영한다.
+        SetPageSize(width, height, false);
+        if (_currentPageIndex >= 0 && _currentPageIndex < _pages.Count)
+        {
+            _pages[_currentPageIndex].PageWidth = _pageWidth;
+            _pages[_currentPageIndex].PageHeight = _pageHeight;
+        }
+    }
+
+    private void SetPageSize(double width, double height, bool updateTextBoxes)
+    {
+        _pageWidth = Math.Clamp(width, 100, 5000);
+        _pageHeight = Math.Clamp(height, 100, 5000);
+
+        PageSurface.Width = _pageWidth;
+        PageSurface.Height = _pageHeight;
+        PanelCanvas.Width = _pageWidth;
+        PanelCanvas.Height = _pageHeight;
+        PageOverlay.Width = _pageWidth;
+        PageOverlay.Height = _pageHeight;
+
+        if (updateTextBoxes)
+        {
+            _isLoadingInspector = true;
+            PageWidthTextBox.Text = $"{_pageWidth:0}";
+            PageHeightTextBox.Text = $"{_pageHeight:0}";
+            _isLoadingInspector = false;
+        }
+
+        UpdatePageFit();
+    }
+
+    private void PageFitCheckBox_Changed(object sender, RoutedEventArgs e)
+    {
+        UpdatePageFit();
+    }
+
+    private void ToggleInspector_Click(object sender, RoutedEventArgs e)
+    {
+        SetInspectorVisible(InspectorPanel.Visibility != Visibility.Visible);
+    }
+
+    private void SetInspectorVisible(bool show)
+    {
+        InspectorPanel.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        InspectorColumn.Width = show ? new GridLength(320) : new GridLength(0);
+        InspectorToggleButton.Content = show ? "◀" : "▶";
+        // 인스펙터를 접으면 페이지 영역 너비가 바뀌므로 쪽 맞춤을 다시 계산한다
+        // (ScrollViewer SizeChanged로도 갱신되지만 즉시 반영을 위해 호출).
+        UpdatePageFit();
+    }
+
+    private void PageScrollViewer_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        // 이미지가 선택된 칸 위에서는 휠로 이미지 확대/축소(기존 기능)를 유지한다.
+        var panel = FindPanelAt(e.OriginalSource);
+        if (panel?.SelectedImage != null && !IsInsideBubble(e.OriginalSource as DependencyObject))
+        {
+            return;
+        }
+
+        // 그 외에는 휠 위/아래로 페이지를 넘긴다.
+        NavigatePage(e.Delta > 0 ? -1 : 1);
+        e.Handled = true;
+    }
+
+    // 마우스 위치의 칸을 비주얼 트리에서 거슬러 올라가 찾는다.
+    private ComicPanel? FindPanelAt(object? source)
+    {
+        var node = source as DependencyObject;
+        while (node != null)
+        {
+            if (node is Border border)
+            {
+                var match = _panels.FirstOrDefault(p => ReferenceEquals(p.Frame, border));
+                if (match != null)
+                {
+                    return match;
+                }
+            }
+
+            node = node is Visual or System.Windows.Media.Media3D.Visual3D
+                ? VisualTreeHelper.GetParent(node)
+                : null;
+        }
+
+        return null;
+    }
+
+    // 현재 페이지에서 direction(-1 이전 / +1 다음)만큼 페이지를 전환한다.
+    private void NavigatePage(int direction)
+    {
+        var target = _currentPageIndex + direction;
+        if (target < 0 || target >= _pages.Count)
+        {
+            return;
+        }
+
+        // 페이지 목록 선택을 바꾸면 PageListBox_SelectionChanged가 저장/로드/상태표시를 처리한다.
+        PageListBox.SelectedIndex = target;
+    }
+
+    private void PageScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        UpdatePageFit();
+    }
+
+    // "페이지 쪽 맞춤"이 켜져 있으면 페이지 전체가 보이도록 뷰 영역에 맞춰 축소/확대한다.
+    private void UpdatePageFit()
+    {
+        if (PageFrame == null || PageScrollViewer == null)
+        {
+            return;
+        }
+
+        if (PageFitCheckBox?.IsChecked != true)
+        {
+            PageFrame.LayoutTransform = Transform.Identity;
+            return;
+        }
+
+        // ScrollViewer Padding(28) 양쪽을 빼고, 스크롤바 깜빡임 방지를 위한 여유를 둔다.
+        var availableWidth = PageScrollViewer.ActualWidth - 56 - 4;
+        var availableHeight = PageScrollViewer.ActualHeight - 56 - 4;
+        if (availableWidth <= 0 || availableHeight <= 0)
+        {
+            return;
+        }
+
+        var scale = Math.Min(availableWidth / _pageWidth, availableHeight / _pageHeight);
+        if (double.IsNaN(scale) || double.IsInfinity(scale) || scale <= 0)
+        {
+            scale = 1;
+        }
+
+        PageFrame.LayoutTransform = new ScaleTransform(scale, scale);
+    }
+
+    private void ComicTitleTextBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        UpdateWindowTitle();
+    }
+
+    private void UpdateWindowTitle()
+    {
+        var title = ComicTitleTextBox?.Text?.Trim();
+        Title = string.IsNullOrEmpty(title) ? "NovelViewer - Comic Layout" : $"{title} - NovelViewer";
+    }
+
+    private string GetDefaultProjectFileName()
+    {
+        var title = ComicTitleTextBox.Text.Trim();
+        if (string.IsNullOrEmpty(title))
+        {
+            return "NovelViewerProject.nvjson";
+        }
+
+        foreach (var invalid in Path.GetInvalidFileNameChars())
+        {
+            title = title.Replace(invalid, '_');
+        }
+
+        return title + ".nvjson";
+    }
+
     private void SaveProject_Click(object sender, RoutedEventArgs e)
     {
         SaveCurrentPageState();
@@ -152,7 +369,7 @@ public partial class MainWindow : Window
         {
             Title = "프로젝트 저장",
             Filter = "NovelViewer 프로젝트 (*.nvjson)|*.nvjson|JSON 파일 (*.json)|*.json",
-            FileName = "NovelViewerProject.nvjson"
+            FileName = GetDefaultProjectFileName()
         };
 
         if (dialog.ShowDialog(this) != true)
@@ -162,6 +379,9 @@ public partial class MainWindow : Window
 
         var project = new ComicProjectData
         {
+            Title = ComicTitleTextBox.Text.Trim(),
+            AutoMargin = ParseDoubleOr(AutoMarginTextBox.Text, 24),
+            AutoGutter = ParseDoubleOr(AutoGutterTextBox.Text, 14),
             CurrentPageIndex = _currentPageIndex,
             Pages = CaptureProjectPages(Path.GetDirectoryName(dialog.FileName))
         };
@@ -195,6 +415,9 @@ public partial class MainWindow : Window
             }
 
             _projectBaseDirectory = Path.GetDirectoryName(dialog.FileName);
+            ComicTitleTextBox.Text = project.Title;
+            AutoMarginTextBox.Text = $"{project.AutoMargin:0}";
+            AutoGutterTextBox.Text = $"{project.AutoGutter:0}";
             _pages.Clear();
             _pages.AddRange(project.Pages);
             _currentPageIndex = Math.Clamp(project.CurrentPageIndex, 0, _pages.Count - 1);
@@ -412,10 +635,14 @@ public partial class MainWindow : Window
             return;
         }
 
+        var startX = _selectedBubble.Container.Width / 2;
+        var startY = _selectedBubble.Container.Height / 2;
         var tail = new BubbleTail
         {
-            StartX = _selectedBubble.Container.Width / 2,
-            StartY = _selectedBubble.Container.Height / 2,
+            StartX = startX,
+            StartY = startY,
+            MidX = (startX + BubbleTailXSlider.Value) / 2,
+            MidY = (startY + BubbleTailYSlider.Value) / 2,
             X = BubbleTailXSlider.Value,
             Y = BubbleTailYSlider.Value,
             Width = BubbleTailWidthSlider.Value
@@ -548,14 +775,15 @@ public partial class MainWindow : Window
         UpdateImageList(null);
         UpdateBubbleList(null);
 
-        var margin = 24.0;
-        var gutter = 14.0;
-        var rowHeight = Math.Min(280, (PageHeight - margin * 2 - gutter * (pattern.Count - 1)) / pattern.Count);
+        var margin = Math.Max(0, ParseDoubleOr(AutoMarginTextBox.Text, 24));
+        var gutter = Math.Max(0, ParseDoubleOr(AutoGutterTextBox.Text, 14));
+        // 페이지 높이를 줄 수만큼 꽉 채운다(상한 없음).
+        var rowHeight = Math.Max(20, (_pageHeight - margin * 2 - gutter * (pattern.Count - 1)) / pattern.Count);
         var y = margin;
 
         foreach (var columns in pattern)
         {
-            var panelWidth = (PageWidth - margin * 2 - gutter * (columns - 1)) / columns;
+            var panelWidth = Math.Max(20, (_pageWidth - margin * 2 - gutter * (columns - 1)) / columns);
             var x = margin;
 
             for (var column = 0; column < columns; column++)
@@ -588,7 +816,7 @@ public partial class MainWindow : Window
 
     private ComicPageData CaptureCurrentPage(string name)
     {
-        var page = new ComicPageData { Name = name };
+        var page = new ComicPageData { Name = name, PageWidth = _pageWidth, PageHeight = _pageHeight };
 
         foreach (var panel in _panels)
         {
@@ -630,6 +858,8 @@ public partial class MainWindow : Window
                         {
                             StartX = tail.StartX,
                             StartY = tail.StartY,
+                            MidX = tail.MidX,
+                            MidY = tail.MidY,
                             X = tail.X,
                             Y = tail.Y,
                             Width = tail.Width
@@ -651,7 +881,7 @@ public partial class MainWindow : Window
 
         foreach (var page in _pages)
         {
-            var copiedPage = new ComicPageData { Name = page.Name };
+            var copiedPage = new ComicPageData { Name = page.Name, PageWidth = page.PageWidth, PageHeight = page.PageHeight };
 
             foreach (var panel in page.Panels)
             {
@@ -689,6 +919,8 @@ public partial class MainWindow : Window
     {
         ClearPageVisuals();
         _nextPanelNumber = 1;
+        // 페이지마다 개별 크기를 적용한다(입력칸도 갱신).
+        SetPageSize(page.PageWidth, page.PageHeight, true);
 
         foreach (var panelData in page.Panels)
         {
@@ -731,6 +963,8 @@ public partial class MainWindow : Window
                 {
                     StartX = tail.StartX,
                     StartY = tail.StartY,
+                    MidX = double.IsNaN(tail.MidX) ? (tail.StartX + tail.X) / 2 : tail.MidX,
+                    MidY = double.IsNaN(tail.MidY) ? (tail.StartY + tail.Y) / 2 : tail.MidY,
                     X = tail.X,
                     Y = tail.Y,
                     Width = tail.Width
@@ -752,16 +986,11 @@ public partial class MainWindow : Window
             panel.Placeholder.Visibility = panel.Images.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         }
 
-        if (_panels.Count > 0)
-        {
-            SelectPanel(_panels[0]);
-        }
-        else
-        {
-            ClearSelection();
-        }
+        // 페이지를 열거나 넘어갈 때는 칸을 자동 선택하지 않고 모든 선택을 해제한다.
+        ClearSelection();
 
         UpdateLayoutSummary();
+        UpdatePageIndicator();
     }
 
     private void ClearPageVisuals()
@@ -796,6 +1025,18 @@ public partial class MainWindow : Window
 
         PageListBox.SelectedIndex = _currentPageIndex;
         _isUpdatingPageList = false;
+        UpdatePageIndicator();
+    }
+
+    private void UpdatePageIndicator()
+    {
+        if (PageIndicatorText == null)
+        {
+            return;
+        }
+
+        var current = _pages.Count == 0 ? 0 : _currentPageIndex + 1;
+        PageIndicatorText.Text = $"페이지 {current} / {_pages.Count}";
     }
 
     private void AddPanel(ComicPanel panel)
@@ -924,14 +1165,9 @@ public partial class MainWindow : Window
             IsHitTestVisible = false
         };
 
-        var tailStartHandle = CreateTailHandle();
-        var tailEndHandle = CreateTailHandle();
-
         var content = new Grid();
         content.Children.Add(bodyPath);
         content.Children.Add(textBlock);
-        content.Children.Add(tailStartHandle);
-        content.Children.Add(tailEndHandle);
         content.Children.Add(resizeHandle);
 
         var container = new Border
@@ -946,7 +1182,7 @@ public partial class MainWindow : Window
             Tag = "SpeechBubble"
         };
 
-        var bubble = new SpeechBubble(ownerPanel, container, bodyPath, textBlock, resizeHandle, tailStartHandle, tailEndHandle)
+        var bubble = new SpeechBubble(ownerPanel, container, bodyPath, textBlock, resizeHandle)
         {
             Shape = GetSelectedBubbleShape()
         };
@@ -962,8 +1198,6 @@ public partial class MainWindow : Window
         container.LostMouseCapture += (_, _) => ResetDragState();
         resizeHandle.DragStarted += (_, _) => SelectBubble(bubble);
         resizeHandle.DragDelta += (_, e) => ResizeBubble(bubble, e);
-        tailStartHandle.DragDelta += (_, e) => DragBubbleTailPoint(bubble, true, e);
-        tailEndHandle.DragDelta += (_, e) => DragBubbleTailPoint(bubble, false, e);
 
         return bubble;
     }
@@ -1115,10 +1349,9 @@ public partial class MainWindow : Window
     {
         SelectPanel(panel);
 
-        var x = GetCanvasLeft(panel.Frame);
-        var y = GetCanvasTop(panel.Frame);
-        var width = Math.Clamp(panel.Frame.Width + e.HorizontalChange, PanelWidthSlider.Minimum, PageWidth - x);
-        var height = Math.Clamp(panel.Frame.Height + e.VerticalChange, PanelHeightSlider.Minimum, PageHeight - y);
+        // 칸이 페이지 밖으로 커질 수 있게 위쪽 한계는 두지 않는다(넘어간 부분은 잘림).
+        var width = Math.Max(PanelWidthSlider.Minimum, panel.Frame.Width + e.HorizontalChange);
+        var height = Math.Max(PanelHeightSlider.Minimum, panel.Frame.Height + e.VerticalChange);
 
         panel.Frame.Width = width;
         panel.Frame.Height = height;
@@ -1162,6 +1395,10 @@ public partial class MainWindow : Window
         BubbleXSlider.Value = Math.Clamp(relative.X, BubbleXSlider.Minimum, BubbleXSlider.Maximum);
         BubbleYSlider.Value = Math.Clamp(relative.Y, BubbleYSlider.Minimum, BubbleYSlider.Maximum);
         UpdateMergedBubbleOutlines();
+        if (bubble == _selectedBubble)
+        {
+            PositionSelectedTailHandles();
+        }
         UpdateInspectorLabels();
     }
 
@@ -1283,10 +1520,8 @@ public partial class MainWindow : Window
 
     private void ApplyPanelValues(ComicPanel panel)
     {
-        var width = Math.Min(PanelWidthSlider.Value, PageWidth - PanelXSlider.Value);
-        var height = Math.Min(PanelHeightSlider.Value, PageHeight - PanelYSlider.Value);
-        panel.Frame.Width = width;
-        panel.Frame.Height = height;
+        panel.Frame.Width = PanelWidthSlider.Value;
+        panel.Frame.Height = PanelHeightSlider.Value;
         UpdatePanelImageSizes(panel);
         SetPanelPosition(panel, PanelXSlider.Value, PanelYSlider.Value);
         UpdateFreeBubblesForPanel(panel);
@@ -1323,6 +1558,7 @@ public partial class MainWindow : Window
             BubbleShape.Rectangle => 1,
             BubbleShape.Cloud => 2,
             BubbleShape.Shout => 3,
+            BubbleShape.None => 4,
             _ => 0
         };
         BubbleWidthSlider.Value = bubble.Container.Width;
@@ -1416,20 +1652,26 @@ public partial class MainWindow : Window
         {
             Canvas.SetLeft(bubble.Container, x);
             Canvas.SetTop(bubble.Container, y);
-            UpdateMergedBubbleOutlines();
-            return;
+        }
+        else
+        {
+            var panelOrigin = bubble.OwnerPanel.Overlay.TransformToVisual(PageOverlay).Transform(new Point(0, 0));
+            Canvas.SetLeft(bubble.Container, panelOrigin.X + x);
+            Canvas.SetTop(bubble.Container, panelOrigin.Y + y);
         }
 
-        var panelOrigin = bubble.OwnerPanel.Overlay.TransformToVisual(PageOverlay).Transform(new Point(0, 0));
-        Canvas.SetLeft(bubble.Container, panelOrigin.X + x);
-        Canvas.SetTop(bubble.Container, panelOrigin.Y + y);
         UpdateMergedBubbleOutlines();
+        if (bubble == _selectedBubble)
+        {
+            PositionSelectedTailHandles();
+        }
     }
 
     private void SetPanelPosition(ComicPanel panel, double x, double y)
     {
         Canvas.SetLeft(panel.Frame, ClampPanelX(x, panel.Frame.Width));
         Canvas.SetTop(panel.Frame, ClampPanelY(y, panel.Frame.Height));
+        PositionSelectedTailHandles();
     }
 
     private void UpdateSelectionLabels()
@@ -1568,7 +1810,6 @@ public partial class MainWindow : Window
                 bubble.BodyPath.Stroke = Brushes.Transparent;
                 bubble.BodyPath.StrokeThickness = 0;
                 bubble.ResizeHandle.Visibility = isSelectedBubble ? Visibility.Visible : Visibility.Hidden;
-                UpdateBubbleTailHandles(bubble);
             }
 
             foreach (var image in panel.Images)
@@ -1578,6 +1819,8 @@ public partial class MainWindow : Window
                     : Visibility.Hidden;
             }
         }
+
+        PositionSelectedTailHandles();
     }
 
     private void UpdateInspectorLabels()
@@ -1590,7 +1833,10 @@ public partial class MainWindow : Window
             BubbleHeightText == null ||
             BubbleFontText == null ||
             BubbleXText == null ||
-            BubbleYText == null)
+            BubbleYText == null ||
+            BubbleTailXText == null ||
+            BubbleTailYText == null ||
+            BubbleTailWidthText == null)
         {
             return;
         }
@@ -1604,6 +1850,9 @@ public partial class MainWindow : Window
         BubbleFontText.Text = $"말풍선 글자: {BubbleFontSlider.Value:0}px";
         BubbleXText.Text = $"말풍선 X 위치: {BubbleXSlider.Value:0}px";
         BubbleYText.Text = $"말풍선 Y 위치: {BubbleYSlider.Value:0}px";
+        BubbleTailXText.Text = $"꼬리 끝점 X: {BubbleTailXSlider.Value:0}px";
+        BubbleTailYText.Text = $"꼬리 끝점 Y: {BubbleTailYSlider.Value:0}px";
+        BubbleTailWidthText.Text = $"꼬리 굵기: {BubbleTailWidthSlider.Value:0}px";
     }
 
     private void UpdateLayoutSummary()
@@ -1863,6 +2112,8 @@ public partial class MainWindow : Window
             BubbleShape.Rectangle => CreateRectangleGeometry(width, height),
             BubbleShape.Cloud => CreateCloudGeometry(width, height),
             BubbleShape.Shout => CreateShoutGeometry(width, height),
+            // 테두리 없음: 본체 도형 없이 글자만 보인다(채움·외곽선 모두 없음).
+            BubbleShape.None => null,
             _ => CreateOvalGeometry(width, height)
         };
 
@@ -1916,6 +2167,7 @@ public partial class MainWindow : Window
     private static Geometry CreateTailGeometry(BubbleTail tail)
     {
         var start = new Point(tail.StartX, tail.StartY);
+        var mid = new Point(tail.MidX, tail.MidY);
         var end = new Point(tail.X, tail.Y);
         var direction = end - start;
 
@@ -1929,15 +2181,19 @@ public partial class MainWindow : Window
         var halfWidth = Math.Max(2, tail.Width / 2);
         var startA = start + normal * halfWidth;
         var startB = start - normal * halfWidth;
-        var control = new Point((start.X + end.X) / 2 + normal.X * halfWidth, (start.Y + end.Y) / 2 + normal.Y * halfWidth);
+
+        // 중간 점을 곡선의 제어점으로 사용한다. 베이스의 양쪽 변은
+        // 중간 점을 기준으로 ±halfWidth만큼 벌어진 제어점을 지나 끝점(꼭짓점)으로 모인다.
+        var controlA = mid + normal * halfWidth;
+        var controlB = mid - normal * halfWidth;
 
         var figure = new PathFigure { StartPoint = startA, IsClosed = true };
-        figure.Segments.Add(new QuadraticBezierSegment(control, end, true));
-        figure.Segments.Add(new QuadraticBezierSegment(control, startB, true));
+        figure.Segments.Add(new QuadraticBezierSegment(controlA, end, true));
+        figure.Segments.Add(new QuadraticBezierSegment(controlB, startB, true));
         return new PathGeometry(new[] { figure });
     }
 
-    private static Thumb CreateTailHandle()
+    private static Thumb CreateTailHandle(Color? color = null)
     {
         return new Thumb
         {
@@ -1946,55 +2202,104 @@ public partial class MainWindow : Window
             HorizontalAlignment = HorizontalAlignment.Left,
             VerticalAlignment = VerticalAlignment.Top,
             Cursor = Cursors.SizeAll,
-            Background = new SolidColorBrush(Color.FromRgb(43, 111, 106)),
+            Background = new SolidColorBrush(color ?? Color.FromRgb(43, 111, 106)),
             BorderBrush = Brushes.White,
             BorderThickness = new Thickness(2),
             Visibility = Visibility.Hidden
         };
     }
 
-    private void DragBubbleTailPoint(SpeechBubble bubble, bool isStartPoint, DragDeltaEventArgs e)
+    private void DragSelectedTailPoint(TailPointKind point, DragDeltaEventArgs e)
     {
-        SelectBubble(bubble);
-
-        if (_selectedBubbleTail == null)
+        if (_selectedBubble == null || _selectedBubbleTail == null)
         {
             return;
         }
 
-        if (isStartPoint)
+        switch (point)
         {
-            _selectedBubbleTail.StartX += e.HorizontalChange;
-            _selectedBubbleTail.StartY += e.VerticalChange;
-        }
-        else
-        {
-            _selectedBubbleTail.X += e.HorizontalChange;
-            _selectedBubbleTail.Y += e.VerticalChange;
+            case TailPointKind.Start:
+                // 넓은 쪽(밑변)을 끌면 꼬리 전체를 같은 변위로 통째로 옮긴다.
+                _selectedBubbleTail.StartX += e.HorizontalChange;
+                _selectedBubbleTail.StartY += e.VerticalChange;
+                _selectedBubbleTail.MidX += e.HorizontalChange;
+                _selectedBubbleTail.MidY += e.VerticalChange;
+                _selectedBubbleTail.X += e.HorizontalChange;
+                _selectedBubbleTail.Y += e.VerticalChange;
+                break;
+            case TailPointKind.Mid:
+                _selectedBubbleTail.MidX += e.HorizontalChange;
+                _selectedBubbleTail.MidY += e.VerticalChange;
+                break;
+            default:
+                _selectedBubbleTail.X += e.HorizontalChange;
+                _selectedBubbleTail.Y += e.VerticalChange;
+                break;
         }
 
-        _isLoadingInspector = true;
-        BubbleTailXSlider.Value = Math.Clamp(_selectedBubbleTail.X, BubbleTailXSlider.Minimum, BubbleTailXSlider.Maximum);
-        BubbleTailYSlider.Value = Math.Clamp(_selectedBubbleTail.Y, BubbleTailYSlider.Minimum, BubbleTailYSlider.Maximum);
-        BubbleTailWidthSlider.Value = Math.Clamp(_selectedBubbleTail.Width, BubbleTailWidthSlider.Minimum, BubbleTailWidthSlider.Maximum);
-        _isLoadingInspector = false;
-        UpdateBubbleGeometry(bubble);
-        UpdateBubbleTailList(bubble);
+        // 끝점 좌표가 바뀌는 경우(끝점 이동, 또는 시작점 이동으로 전체가 따라온 경우) 끝점 슬라이더를 동기화한다.
+        if (point == TailPointKind.Start || point == TailPointKind.End)
+        {
+            _isLoadingInspector = true;
+            BubbleTailXSlider.Value = Math.Clamp(_selectedBubbleTail.X, BubbleTailXSlider.Minimum, BubbleTailXSlider.Maximum);
+            BubbleTailYSlider.Value = Math.Clamp(_selectedBubbleTail.Y, BubbleTailYSlider.Minimum, BubbleTailYSlider.Maximum);
+            BubbleTailWidthSlider.Value = Math.Clamp(_selectedBubbleTail.Width, BubbleTailWidthSlider.Minimum, BubbleTailWidthSlider.Maximum);
+            _isLoadingInspector = false;
+        }
+
+        UpdateBubbleGeometry(_selectedBubble);
+        UpdateBubbleTailList(_selectedBubble);
+        UpdateInspectorLabels();
     }
 
+    // 호출부 호환용: 인자 말풍선과 무관하게 선택된 꼬리에 대해 싱글톤 핸들을 갱신한다.
     private void UpdateBubbleTailHandles(SpeechBubble bubble)
     {
-        var showHandles = bubble == _selectedBubble && _selectedBubbleTail != null && bubble.Tails.Contains(_selectedBubbleTail);
-        bubble.TailStartHandle.Visibility = showHandles ? Visibility.Visible : Visibility.Hidden;
-        bubble.TailEndHandle.Visibility = showHandles ? Visibility.Visible : Visibility.Hidden;
+        PositionSelectedTailHandles();
+    }
 
-        if (!showHandles || _selectedBubbleTail == null)
+    private void PositionSelectedTailHandles()
+    {
+        EnsureTailHandles();
+
+        var tail = _selectedBubbleTail;
+        var show = _selectedBubble != null && tail != null && _selectedBubble.Tails.Contains(tail);
+        var visibility = show ? Visibility.Visible : Visibility.Hidden;
+        _tailStartHandle!.Visibility = visibility;
+        _tailMidHandle!.Visibility = visibility;
+        _tailEndHandle!.Visibility = visibility;
+
+        if (!show || _selectedBubble == null || tail == null)
         {
             return;
         }
 
-        bubble.TailStartHandle.Margin = new Thickness(_selectedBubbleTail.StartX - 7, _selectedBubbleTail.StartY - 7, 0, 0);
-        bubble.TailEndHandle.Margin = new Thickness(_selectedBubbleTail.X - 7, _selectedBubbleTail.Y - 7, 0, 0);
+        var origin = GetBubblePageOrigin(_selectedBubble);
+        PlaceTailHandle(_tailStartHandle, origin.X + tail.StartX, origin.Y + tail.StartY);
+        PlaceTailHandle(_tailMidHandle, origin.X + tail.MidX, origin.Y + tail.MidY);
+        PlaceTailHandle(_tailEndHandle, origin.X + tail.X, origin.Y + tail.Y);
+    }
+
+    private static void PlaceTailHandle(Thumb handle, double pageX, double pageY)
+    {
+        Canvas.SetLeft(handle, pageX - handle.Width / 2);
+        Canvas.SetTop(handle, pageY - handle.Height / 2);
+    }
+
+    // 말풍선 컨테이너의 (0,0)을 페이지(PageOverlay) 좌표로 변환한다.
+    // 크롭된 말풍선은 칸 오버레이에 들어 있으므로 칸 오버레이 원점을 더해 준다.
+    private Point GetBubblePageOrigin(SpeechBubble bubble)
+    {
+        var left = GetCanvasLeft(bubble.Container);
+        var top = GetCanvasTop(bubble.Container);
+
+        if (!bubble.IsCropped)
+        {
+            return new Point(left, top);
+        }
+
+        var panelOrigin = bubble.OwnerPanel.Overlay.TransformToVisual(PageOverlay).Transform(new Point(0, 0));
+        return new Point(panelOrigin.X + left, panelOrigin.Y + top);
     }
 
     private static System.Windows.Shapes.Path CreateBubbleOutlinePath()
@@ -2020,6 +2325,31 @@ public partial class MainWindow : Window
         Panel.SetZIndex(_pageBubbleOutlinePath, int.MaxValue - 1);
     }
 
+    private void EnsureTailHandles()
+    {
+        if (_tailStartHandle == null)
+        {
+            _tailStartHandle = CreateTailHandle();
+            _tailMidHandle = CreateTailHandle(Color.FromRgb(214, 122, 32));
+            _tailEndHandle = CreateTailHandle();
+            _tailStartHandle.DragDelta += (_, e) => DragSelectedTailPoint(TailPointKind.Start, e);
+            _tailMidHandle!.DragDelta += (_, e) => DragSelectedTailPoint(TailPointKind.Mid, e);
+            _tailEndHandle!.DragDelta += (_, e) => DragSelectedTailPoint(TailPointKind.End, e);
+        }
+
+        // 핸들은 페이지 좌표로 배치하므로 페이지 레이어에 올려, 칸 경계 클리핑을 받지 않게 한다.
+        foreach (var handle in new[] { _tailStartHandle!, _tailMidHandle!, _tailEndHandle! })
+        {
+            if (!PageOverlay.Children.Contains(handle))
+            {
+                handle.HorizontalAlignment = HorizontalAlignment.Left;
+                handle.VerticalAlignment = VerticalAlignment.Top;
+                PageOverlay.Children.Add(handle);
+                Panel.SetZIndex(handle, int.MaxValue);
+            }
+        }
+    }
+
     private BubbleShape GetSelectedBubbleShape()
     {
         if (BubbleShapeComboBox?.SelectedItem is not ComboBoxItem item)
@@ -2032,6 +2362,7 @@ public partial class MainWindow : Window
             "Rectangle" => BubbleShape.Rectangle,
             "Cloud" => BubbleShape.Cloud,
             "Shout" => BubbleShape.Shout,
+            "None" => BubbleShape.None,
             _ => BubbleShape.Oval
         };
     }
@@ -2241,14 +2572,18 @@ public partial class MainWindow : Window
         return double.IsNaN(value) ? 0 : value;
     }
 
-    private static double ClampPanelX(double x, double width)
+    // 칸이 페이지 밖으로 넘어갈 수 있게 허용하되(넘어간 부분은 캔버스 클리핑으로 잘림),
+    // 최소 MinPanelVisible 만큼은 페이지 안에 남겨 다시 잡을 수 있게 한다.
+    private const double MinPanelVisible = 40;
+
+    private double ClampPanelX(double x, double width)
     {
-        return Math.Clamp(x, 0, Math.Max(0, PageWidth - width));
+        return Math.Clamp(x, MinPanelVisible - width, _pageWidth - MinPanelVisible);
     }
 
-    private static double ClampPanelY(double y, double height)
+    private double ClampPanelY(double y, double height)
     {
-        return Math.Clamp(y, 0, Math.Max(0, PageHeight - height));
+        return Math.Clamp(y, MinPanelVisible - height, _pageHeight - MinPanelVisible);
     }
 
     private static List<int> ParsePattern(string text)
@@ -2258,6 +2593,11 @@ public partial class MainWindow : Window
             .Select(value => int.TryParse(value, out var count) ? count : 0)
             .Where(count => count > 0 && count <= 6)
             .ToList();
+    }
+
+    private static double ParseDoubleOr(string text, double fallback)
+    {
+        return double.TryParse(text, out var value) ? value : fallback;
     }
 
     private static BitmapImage LoadBitmap(string path)
@@ -2328,10 +2668,30 @@ public partial class MainWindow : Window
                 Left = settings.Left;
                 Top = settings.Top;
             }
+
+            // 앱 설정 복원
+            LayoutPatternTextBox.Text = settings.LayoutPattern ?? "1,2,1";
+            AutoMarginTextBox.Text = settings.AutoMargin ?? "24";
+            AutoGutterTextBox.Text = settings.AutoGutter ?? "14";
+            SetBubbleShapeByTag(settings.BubbleShape ?? "Oval");
+            PageFitCheckBox.IsChecked = settings.PageFit;
+            SetInspectorVisible(settings.InspectorVisible);
         }
         catch
         {
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
+        }
+    }
+
+    private void SetBubbleShapeByTag(string tag)
+    {
+        foreach (var item in BubbleShapeComboBox.Items.OfType<ComboBoxItem>())
+        {
+            if ((item.Tag as string) == tag)
+            {
+                BubbleShapeComboBox.SelectedItem = item;
+                return;
+            }
         }
     }
 
@@ -2345,7 +2705,13 @@ public partial class MainWindow : Window
                 Width = RestoreBounds.Width,
                 Height = RestoreBounds.Height,
                 Left = RestoreBounds.Left,
-                Top = RestoreBounds.Top
+                Top = RestoreBounds.Top,
+                PageFit = PageFitCheckBox.IsChecked == true,
+                LayoutPattern = LayoutPatternTextBox.Text,
+                AutoMargin = AutoMarginTextBox.Text,
+                AutoGutter = AutoGutterTextBox.Text,
+                BubbleShape = (BubbleShapeComboBox.SelectedItem as ComboBoxItem)?.Tag as string ?? "Oval",
+                InspectorVisible = InspectorPanel.Visibility == Visibility.Visible
             };
             var json = JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true });
             File.WriteAllText(_windowSettingsPath, json);
@@ -2436,17 +2802,13 @@ public sealed class SpeechBubble
         Border container,
         System.Windows.Shapes.Path bodyPath,
         TextBlock textBlock,
-        Thumb resizeHandle,
-        Thumb tailStartHandle,
-        Thumb tailEndHandle)
+        Thumb resizeHandle)
     {
         OwnerPanel = ownerPanel;
         Container = container;
         BodyPath = bodyPath;
         TextBlock = textBlock;
         ResizeHandle = resizeHandle;
-        TailStartHandle = tailStartHandle;
-        TailEndHandle = tailEndHandle;
     }
 
     public ComicPanel OwnerPanel { get; }
@@ -2454,8 +2816,6 @@ public sealed class SpeechBubble
     public System.Windows.Shapes.Path BodyPath { get; }
     public TextBlock TextBlock { get; }
     public Thumb ResizeHandle { get; }
-    public Thumb TailStartHandle { get; }
-    public Thumb TailEndHandle { get; }
     public bool IsCropped { get; set; } = true;
     public BubbleShape Shape { get; set; } = BubbleShape.Oval;
     public List<BubbleTail> Tails { get; } = new();
@@ -2482,6 +2842,8 @@ public sealed class BubbleTail
 {
     public double StartX { get; set; } = 85;
     public double StartY { get; set; } = 50;
+    public double MidX { get; set; } = 107;
+    public double MidY { get; set; } = 90;
     public double X { get; set; } = 130;
     public double Y { get; set; } = 130;
     public double Width { get; set; } = 28;
@@ -2497,11 +2859,22 @@ public enum BubbleShape
     Oval,
     Rectangle,
     Cloud,
-    Shout
+    Shout,
+    None
+}
+
+public enum TailPointKind
+{
+    Start,
+    Mid,
+    End
 }
 
 public sealed class ComicProjectData
 {
+    public string Title { get; set; } = string.Empty;
+    public double AutoMargin { get; set; } = 24;
+    public double AutoGutter { get; set; } = 14;
     public int CurrentPageIndex { get; set; }
     public List<ComicPageData> Pages { get; set; } = new();
 }
@@ -2509,6 +2882,8 @@ public sealed class ComicProjectData
 public sealed class ComicPageData
 {
     public string Name { get; set; } = "Page";
+    public double PageWidth { get; set; } = 820;
+    public double PageHeight { get; set; } = 1120;
     public List<ComicPanelData> Panels { get; set; } = new();
 }
 
@@ -2548,6 +2923,10 @@ public sealed class BubbleTailData
 {
     public double StartX { get; set; } = 85;
     public double StartY { get; set; } = 50;
+    // 구버전 저장 파일에는 Mid 값이 없으므로 NaN을 기본값으로 두고,
+    // 불러올 때 NaN이면 시작점과 끝점의 중점으로 계산한다.
+    public double MidX { get; set; } = double.NaN;
+    public double MidY { get; set; } = double.NaN;
     public double X { get; set; } = 130;
     public double Y { get; set; } = 130;
     public double Width { get; set; } = 28;
@@ -2559,4 +2938,11 @@ public sealed class WindowSettings
     public double Height { get; set; } = 820;
     public double Left { get; set; } = -1;
     public double Top { get; set; } = -1;
+    // 프로젝트와 무관한 앱 설정(다음 실행 시 복원).
+    public bool PageFit { get; set; }
+    public string LayoutPattern { get; set; } = "1,2,1";
+    public string AutoMargin { get; set; } = "24";
+    public string AutoGutter { get; set; } = "14";
+    public string BubbleShape { get; set; } = "Oval";
+    public bool InspectorVisible { get; set; } = true;
 }

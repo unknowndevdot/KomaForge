@@ -9,17 +9,44 @@
         Background="{StaticResource WindowBackgroundBrush}">
     <Grid>
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="320" />
+            <ColumnDefinition x:Name="InspectorColumn" Width="320" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
-        <Border Grid.Column="0"
+        <Border x:Name="InspectorPanel"
+                Grid.Column="0"
                 Background="#FFFFFF"
                 BorderBrush="#DDD8CE"
                 BorderThickness="0,0,1,0"
                 Padding="16">
             <ScrollViewer VerticalScrollBarVisibility="Auto">
                 <StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                        <Button Content="저장"
+                                Click="SaveProject_Click"
+                                Margin="0,0,8,0" />
+                        <Button Content="불러오기"
+                                Click="LoadProject_Click"
+                                Margin="0" />
+                    </StackPanel>
+
+                    <TextBlock Text="만화 제목"
+                               Foreground="#55514A"
+                               Margin="0,0,0,6" />
+                    <TextBox x:Name="ComicTitleTextBox"
+                             MinHeight="34"
+                             Padding="8,5"
+                             VerticalContentAlignment="Center"
+                             TextChanged="ComicTitleTextBox_TextChanged"
+                             Margin="0,0,0,18" />
+
+                    <CheckBox x:Name="PageFitCheckBox"
+                              Content="페이지 쪽 맞춤"
+                              IsChecked="False"
+                              Checked="PageFitCheckBox_Changed"
+                              Unchecked="PageFitCheckBox_Changed"
+                              Margin="0,0,0,18" />
+
                     <TextBlock Text="페이지"
                                FontSize="20"
                                FontWeight="SemiBold"
@@ -30,21 +57,43 @@
                              MaxHeight="150"
                              SelectionChanged="PageListBox_SelectionChanged"
                              Margin="0,0,0,8" />
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                        <Button Content="페이지 추가"
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,18">
+                        <Button Content="추가"
                                 Click="AddPage_Click"
                                 Margin="0,0,8,0" />
                         <Button Content="삭제"
                                 Click="DeletePage_Click"
+                                Margin="0,0,8,0" />
+                        <Button Content="위로"
+                                Click="MovePageUp_Click"
+                                Margin="0,0,8,0" />
+                        <Button Content="아래로"
+                                Click="MovePageDown_Click"
                                 Margin="0" />
                     </StackPanel>
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,18">
-                        <Button Content="저장"
-                                Click="SaveProject_Click"
-                                Margin="0,0,8,0" />
-                        <Button Content="불러오기"
-                                Click="LoadProject_Click"
-                                Margin="0" />
+
+                    <TextBlock Text="페이지 크기 (너비 × 높이)"
+                               Foreground="#55514A"
+                               Margin="0,0,0,6" />
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                        <TextBox x:Name="PageWidthTextBox"
+                                 Text="820"
+                                 Width="70"
+                                 MinHeight="34"
+                                 Padding="8,5"
+                                 VerticalContentAlignment="Center"
+                                 TextChanged="PageSizeTextBox_TextChanged" />
+                        <TextBlock Text="×"
+                                   VerticalAlignment="Center"
+                                   Margin="6,0"
+                                   Foreground="#55514A" />
+                        <TextBox x:Name="PageHeightTextBox"
+                                 Text="1120"
+                                 Width="70"
+                                 MinHeight="34"
+                                 Padding="8,5"
+                                 VerticalContentAlignment="Center"
+                                 TextChanged="PageSizeTextBox_TextChanged" />
                     </StackPanel>
 
                     <TextBlock Text="칸"
@@ -52,6 +101,28 @@
                                FontWeight="SemiBold"
                                Foreground="{StaticResource TextBrush}"
                                Margin="0,0,0,12" />
+
+                    <TextBlock Text="자동 생성 여백 / 간격"
+                               Foreground="#55514A"
+                               Margin="0,0,0,6" />
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                        <TextBox x:Name="AutoMarginTextBox"
+                                 Text="24"
+                                 Width="70"
+                                 MinHeight="34"
+                                 Padding="8,5"
+                                 VerticalContentAlignment="Center" />
+                        <TextBlock Text="/"
+                                   VerticalAlignment="Center"
+                                   Margin="6,0"
+                                   Foreground="#55514A" />
+                        <TextBox x:Name="AutoGutterTextBox"
+                                 Text="14"
+                                 Width="70"
+                                 MinHeight="34"
+                                 Padding="8,5"
+                                 VerticalContentAlignment="Center" />
+                    </StackPanel>
 
                     <TextBlock Text="기본 칸 구성"
                                Foreground="#55514A"
@@ -72,15 +143,6 @@
                                Foreground="#55514A"
                                Margin="0,0,0,12" />
 
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-                        <Button Content="칸 추가"
-                                Click="AddPanel_Click"
-                                Margin="0,0,8,0" />
-                        <Button Content="삭제"
-                                Click="DeletePanel_Click"
-                                Margin="0" />
-                    </StackPanel>
-
                     <TextBlock Text="선택한 칸"
                                FontWeight="SemiBold"
                                Foreground="{StaticResource TextBrush}"
@@ -91,6 +153,12 @@
                              SelectionChanged="PanelListBox_SelectionChanged"
                              Margin="0,0,0,8" />
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                        <Button Content="추가"
+                                Click="AddPanel_Click"
+                                Margin="0,0,8,0" />
+                        <Button Content="삭제"
+                                Click="DeletePanel_Click"
+                                Margin="0,0,8,0" />
                         <Button Content="위로"
                                 Click="MovePanelUp_Click"
                                 Margin="0,0,8,0" />
@@ -98,13 +166,6 @@
                                 Click="MovePanelDown_Click"
                                 Margin="0" />
                     </StackPanel>
-
-                    <Button Content="선택한 칸에 이미지 넣기"
-                            Click="AddImageToPanel_Click"
-                            Margin="0,0,0,8" />
-                    <Button Content="선택한 칸 이미지 제거"
-                            Click="ClearPanelImage_Click"
-                            Margin="0,0,0,18" />
 
                     <TextBlock Text="선택한 칸의 이미지"
                                FontWeight="SemiBold"
@@ -116,6 +177,12 @@
                              SelectionChanged="ImageListBox_SelectionChanged"
                              Margin="0,0,0,8" />
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,18">
+                        <Button Content="추가"
+                                Click="AddImageToPanel_Click"
+                                Margin="0,0,8,0" />
+                        <Button Content="삭제"
+                                Click="ClearPanelImage_Click"
+                                Margin="0,0,8,0" />
                         <Button Content="위로"
                                 Click="MoveImageUp_Click"
                                 Margin="0,0,8,0" />
@@ -124,71 +191,46 @@
                                 Margin="0" />
                     </StackPanel>
 
-                    <TextBlock Text="칸 위치와 크기"
-                               FontWeight="SemiBold"
-                               Foreground="{StaticResource TextBrush}"
-                               Margin="0,0,0,8" />
-                    <TextBlock x:Name="PanelXText" Foreground="#55514A" />
-                    <Slider x:Name="PanelXSlider"
-                            Minimum="0"
-                            Maximum="760"
-                            Value="40"
-                            ValueChanged="PanelSlider_ValueChanged"
-                            Margin="0,4,0,8" />
-                    <TextBlock x:Name="PanelYText" Foreground="#55514A" />
-                    <Slider x:Name="PanelYSlider"
-                            Minimum="0"
-                            Maximum="1040"
-                            Value="40"
-                            ValueChanged="PanelSlider_ValueChanged"
-                            Margin="0,4,0,8" />
-                    <TextBlock x:Name="PanelWidthText" Foreground="#55514A" />
-                    <Slider x:Name="PanelWidthSlider"
-                            Minimum="120"
-                            Maximum="760"
-                            Value="340"
-                            ValueChanged="PanelSlider_ValueChanged"
-                            Margin="0,4,0,8" />
-                    <TextBlock x:Name="PanelHeightText" Foreground="#55514A" />
-                    <Slider x:Name="PanelHeightSlider"
-                            Minimum="120"
-                            Maximum="520"
-                            Value="300"
-                            ValueChanged="PanelSlider_ValueChanged"
-                            Margin="0,4,0,18" />
+                    <StackPanel Visibility="Collapsed">
+                        <TextBlock Text="칸 위치와 크기"
+                                   FontWeight="SemiBold"
+                                   Foreground="{StaticResource TextBrush}"
+                                   Margin="0,0,0,8" />
+                        <TextBlock x:Name="PanelXText" Foreground="#55514A" />
+                        <Slider x:Name="PanelXSlider"
+                                Minimum="0"
+                                Maximum="760"
+                                Value="40"
+                                ValueChanged="PanelSlider_ValueChanged"
+                                Margin="0,4,0,8" />
+                        <TextBlock x:Name="PanelYText" Foreground="#55514A" />
+                        <Slider x:Name="PanelYSlider"
+                                Minimum="0"
+                                Maximum="1040"
+                                Value="40"
+                                ValueChanged="PanelSlider_ValueChanged"
+                                Margin="0,4,0,8" />
+                        <TextBlock x:Name="PanelWidthText" Foreground="#55514A" />
+                        <Slider x:Name="PanelWidthSlider"
+                                Minimum="120"
+                                Maximum="760"
+                                Value="340"
+                                ValueChanged="PanelSlider_ValueChanged"
+                                Margin="0,4,0,8" />
+                        <TextBlock x:Name="PanelHeightText" Foreground="#55514A" />
+                        <Slider x:Name="PanelHeightSlider"
+                                Minimum="120"
+                                Maximum="520"
+                                Value="300"
+                                ValueChanged="PanelSlider_ValueChanged"
+                                Margin="0,4,0,18" />
+                    </StackPanel>
 
                     <TextBlock Text="말풍선"
                                FontSize="20"
                                FontWeight="SemiBold"
                                Foreground="{StaticResource TextBrush}"
                                Margin="0,0,0,12" />
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-                        <Button Content="말풍선 추가"
-                                Click="AddBubble_Click"
-                                Margin="0,0,8,0" />
-                        <Button Content="삭제"
-                                Click="DeleteBubble_Click"
-                                Margin="0" />
-                    </StackPanel>
-
-                    <TextBlock Text="선택한 말풍선의 꼬리"
-                               FontWeight="SemiBold"
-                               Foreground="{StaticResource TextBrush}"
-                               Margin="0,0,0,8" />
-                    <ListBox x:Name="BubbleTailListBox"
-                             MinHeight="72"
-                             MaxHeight="130"
-                             SelectionChanged="BubbleTailListBox_SelectionChanged"
-                             Margin="0,0,0,8" />
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-                        <Button Content="꼬리 추가"
-                                Click="AddBubbleTail_Click"
-                                Margin="0,0,8,0" />
-                        <Button Content="삭제"
-                                Click="DeleteBubbleTail_Click"
-                                Margin="0" />
-                    </StackPanel>
-
                     <TextBlock Text="선택한 칸의 말풍선"
                                FontWeight="SemiBold"
                                Foreground="{StaticResource TextBrush}"
@@ -199,6 +241,12 @@
                              SelectionChanged="BubbleListBox_SelectionChanged"
                              Margin="0,0,0,8" />
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                        <Button Content="추가"
+                                Click="AddBubble_Click"
+                                Margin="0,0,8,0" />
+                        <Button Content="삭제"
+                                Click="DeleteBubble_Click"
+                                Margin="0,0,8,0" />
                         <Button Content="위로"
                                 Click="MoveBubbleUp_Click"
                                 Margin="0,0,8,0" />
@@ -239,22 +287,25 @@
                         <ComboBoxItem Content="네모" Tag="Rectangle" />
                         <ComboBoxItem Content="구름" Tag="Cloud" />
                         <ComboBoxItem Content="외침" Tag="Shout" />
+                        <ComboBoxItem Content="테두리 없음" Tag="None" />
                     </ComboBox>
 
-                    <TextBlock x:Name="BubbleWidthText" Foreground="#55514A" />
-                    <Slider x:Name="BubbleWidthSlider"
-                            Minimum="90"
-                            Maximum="360"
-                            Value="170"
-                            ValueChanged="BubbleSlider_ValueChanged"
-                            Margin="0,4,0,8" />
-                    <TextBlock x:Name="BubbleHeightText" Foreground="#55514A" />
-                    <Slider x:Name="BubbleHeightSlider"
-                            Minimum="56"
-                            Maximum="240"
-                            Value="100"
-                            ValueChanged="BubbleSlider_ValueChanged"
-                            Margin="0,4,0,8" />
+                    <StackPanel Visibility="Collapsed">
+                        <TextBlock x:Name="BubbleWidthText" Foreground="#55514A" />
+                        <Slider x:Name="BubbleWidthSlider"
+                                Minimum="90"
+                                Maximum="360"
+                                Value="170"
+                                ValueChanged="BubbleSlider_ValueChanged"
+                                Margin="0,4,0,8" />
+                        <TextBlock x:Name="BubbleHeightText" Foreground="#55514A" />
+                        <Slider x:Name="BubbleHeightSlider"
+                                Minimum="56"
+                                Maximum="240"
+                                Value="100"
+                                ValueChanged="BubbleSlider_ValueChanged"
+                                Margin="0,4,0,8" />
+                    </StackPanel>
                     <TextBlock x:Name="BubbleFontText" Foreground="#55514A" />
                     <Slider x:Name="BubbleFontSlider"
                             Minimum="12"
@@ -262,35 +313,57 @@
                             Value="18"
                             ValueChanged="BubbleSlider_ValueChanged"
                             Margin="0,4,0,8" />
-                    <TextBlock x:Name="BubbleXText" Foreground="#55514A" />
-                    <Slider x:Name="BubbleXSlider"
-                            Minimum="-240"
-                            Maximum="700"
-                            Value="30"
-                            ValueChanged="BubbleSlider_ValueChanged"
-                            Margin="0,4,0,8" />
-                    <TextBlock x:Name="BubbleYText" Foreground="#55514A" />
-                    <Slider x:Name="BubbleYSlider"
-                            Minimum="-180"
-                            Maximum="420"
-                            Value="30"
-                            ValueChanged="BubbleSlider_ValueChanged"
-                            Margin="0,4,0,14" />
+                    <StackPanel Visibility="Collapsed">
+                        <TextBlock x:Name="BubbleXText" Foreground="#55514A" />
+                        <Slider x:Name="BubbleXSlider"
+                                Minimum="-240"
+                                Maximum="700"
+                                Value="30"
+                                ValueChanged="BubbleSlider_ValueChanged"
+                                Margin="0,4,0,8" />
+                        <TextBlock x:Name="BubbleYText" Foreground="#55514A" />
+                        <Slider x:Name="BubbleYSlider"
+                                Minimum="-180"
+                                Maximum="420"
+                                Value="30"
+                                ValueChanged="BubbleSlider_ValueChanged"
+                                Margin="0,4,0,14" />
+                    </StackPanel>
 
-                    <TextBlock x:Name="BubbleTailXText" Foreground="#55514A" />
-                    <Slider x:Name="BubbleTailXSlider"
-                            Minimum="-240"
-                            Maximum="420"
-                            Value="130"
-                            ValueChanged="BubbleTailSlider_ValueChanged"
-                            Margin="0,4,0,8" />
-                    <TextBlock x:Name="BubbleTailYText" Foreground="#55514A" />
-                    <Slider x:Name="BubbleTailYSlider"
-                            Minimum="-180"
-                            Maximum="420"
-                            Value="130"
-                            ValueChanged="BubbleTailSlider_ValueChanged"
-                            Margin="0,4,0,8" />
+                    <TextBlock Text="선택한 말풍선의 꼬리"
+                               FontWeight="SemiBold"
+                               Foreground="{StaticResource TextBrush}"
+                               Margin="0,0,0,8" />
+                    <ListBox x:Name="BubbleTailListBox"
+                             MinHeight="72"
+                             MaxHeight="130"
+                             SelectionChanged="BubbleTailListBox_SelectionChanged"
+                             Margin="0,0,0,8" />
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                        <Button Content="꼬리 추가"
+                                Click="AddBubbleTail_Click"
+                                Margin="0,0,8,0" />
+                        <Button Content="삭제"
+                                Click="DeleteBubbleTail_Click"
+                                Margin="0" />
+                    </StackPanel>
+
+                    <StackPanel Visibility="Collapsed">
+                        <TextBlock x:Name="BubbleTailXText" Foreground="#55514A" />
+                        <Slider x:Name="BubbleTailXSlider"
+                                Minimum="-240"
+                                Maximum="420"
+                                Value="130"
+                                ValueChanged="BubbleTailSlider_ValueChanged"
+                                Margin="0,4,0,8" />
+                        <TextBlock x:Name="BubbleTailYText" Foreground="#55514A" />
+                        <Slider x:Name="BubbleTailYSlider"
+                                Minimum="-180"
+                                Maximum="420"
+                                Value="130"
+                                ValueChanged="BubbleTailSlider_ValueChanged"
+                                Margin="0,4,0,8" />
+                    </StackPanel>
                     <TextBlock x:Name="BubbleTailWidthText" Foreground="#55514A" />
                     <Slider x:Name="BubbleTailWidthSlider"
                             Minimum="8"
@@ -300,6 +373,10 @@
                             Margin="0,4,0,14" />
 
                     <TextBlock Text="칸과 말풍선은 드래그로 이동하고, 우하단 핸들로 크기를 조절합니다."
+                               TextWrapping="Wrap"
+                               Foreground="#77736A"
+                               Margin="0,0,0,6" />
+                    <TextBlock Text="꼬리는 세 점(시작·중간·끝) 핸들로 곡선을 조절합니다. 주황 핸들(중간)을 끌면 곡선이 휩니다."
                                TextWrapping="Wrap"
                                Foreground="#77736A" />
                 </StackPanel>
@@ -313,14 +390,19 @@
             </Grid.RowDefinitions>
 
             <ScrollViewer Grid.Row="0"
+                          x:Name="PageScrollViewer"
                           HorizontalScrollBarVisibility="Auto"
                           VerticalScrollBarVisibility="Auto"
-                          Padding="28">
-                <Border Background="#FFFFFF"
+                          Padding="28"
+                          SizeChanged="PageScrollViewer_SizeChanged"
+                          PreviewMouseWheel="PageScrollViewer_PreviewMouseWheel">
+                <Border x:Name="PageFrame"
+                        Background="#FFFFFF"
                         BorderBrush="#D7D2C8"
                         BorderThickness="1"
-                        Padding="18"
-                        HorizontalAlignment="Center">
+                        Padding="0"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center">
                     <Grid x:Name="PageSurface"
                           Width="820"
                           Height="1120"
@@ -338,6 +420,20 @@
                 </Border>
             </ScrollViewer>
 
+            <Button Grid.Row="0"
+                    x:Name="InspectorToggleButton"
+                    Content="◀"
+                    Click="ToggleInspector_Click"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Top"
+                    Width="28"
+                    Height="28"
+                    MinHeight="0"
+                    Padding="0"
+                    FontSize="13"
+                    Margin="8"
+                    ToolTip="인스펙터 접기/펴기" />
+
             <Border Grid.Row="1"
                     Background="#FFFFFF"
                     BorderBrush="#DDD8CE"
@@ -349,10 +445,12 @@
                                VerticalAlignment="Center"
                                Foreground="#55514A"
                                Text="준비됨" />
-                    <TextBlock DockPanel.Dock="Right"
+                    <TextBlock x:Name="PageIndicatorText"
+                               DockPanel.Dock="Right"
                                VerticalAlignment="Center"
                                Foreground="#55514A"
-                               Text="NovelViewer" />
+                               FontWeight="SemiBold"
+                               Text="페이지 1 / 1" />
                 </DockPanel>
             </Border>
         </Grid>
