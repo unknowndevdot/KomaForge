@@ -47,24 +47,3 @@ Windows용 C# WPF **망가 페이지 에디터**입니다. 페이지에 칸(pane
 | `↑` / `↓` | 선택 대상 순서 이동 |
 | `마우스 휠` | 크기 조절 |
 | `Ctrl+클릭` | 잠금된 오브젝트도 선택 |
-
-## 실행 준비
-
-이 프로젝트는 .NET 8 WPF 앱입니다.
-
-1. Windows용 .NET 8 SDK를 설치합니다.
-2. 프로젝트 폴더에서 아래 명령을 실행합니다.
-
-```powershell
-dotnet run
-```
-
-## 단일 실행 파일 빌드
-
-자체 포함 단일 실행 파일(설치 불필요)을 만들려면:
-
-```powershell
-dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
-```
-
-생성 위치: `bin/Release/net8.0-windows/win-x64/publish/KomaForge.exe`
