@@ -1,6 +1,6 @@
 using System.Windows;
 
-namespace NovelViewer;
+namespace KomaForge;
 
 public partial class App : Application
 {
