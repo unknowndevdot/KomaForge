@@ -89,43 +89,80 @@
                     <TextBlock Text="페이지 크기 (너비 × 높이)"
                                Foreground="#55514A"
                                Margin="0,0,0,6" />
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                    <Grid Margin="0,0,0,10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
                         <TextBox x:Name="PageWidthTextBox"
+                                 Grid.Column="0"
                                  Text="820"
-                                 Width="70"
                                  MinHeight="34"
                                  Padding="8,5"
                                  VerticalContentAlignment="Center"
                                  TextChanged="PageSizeTextBox_TextChanged" />
                         <TextBlock Text="×"
+                                   Grid.Column="1"
                                    VerticalAlignment="Center"
                                    Margin="6,0"
                                    Foreground="#55514A" />
                         <TextBox x:Name="PageHeightTextBox"
+                                 Grid.Column="2"
                                  Text="1120"
-                                 Width="70"
                                  MinHeight="34"
                                  Padding="8,5"
                                  VerticalContentAlignment="Center"
                                  TextChanged="PageSizeTextBox_TextChanged" />
-                    </StackPanel>
+                    </Grid>
                     <CheckBox x:Name="BlackBackgroundCheckBox"
                               Content="페이지 배경 검은색"
                               IsChecked="False"
                               Checked="BlackBackgroundCheckBox_Changed"
                               Unchecked="BlackBackgroundCheckBox_Changed"
-                              Margin="0,2,0,0" />
+                              Margin="0,2,0,14" />
+
+                    <TextBlock Text="칸 구성 / 여백 / 간격"
+                               Foreground="#55514A"
+                               Margin="0,0,0,6" />
+                    <UniformGrid Rows="1" Columns="3" Margin="0,0,0,8">
+                        <TextBox x:Name="LayoutPatternTextBox"
+                                 Text="1,2,1"
+                                 MinHeight="34"
+                                 Padding="8,5"
+                                 VerticalContentAlignment="Center"
+                                 Margin="0,0,4,0"
+                                 ToolTip="칸 구성 (예: 1,2,1)" />
+                        <TextBox x:Name="AutoMarginTextBox"
+                                 Text="24"
+                                 MinHeight="34"
+                                 Padding="8,5"
+                                 VerticalContentAlignment="Center"
+                                 Margin="0,0,4,0"
+                                 ToolTip="자동 생성 여백" />
+                        <TextBox x:Name="AutoGutterTextBox"
+                                 Text="14"
+                                 MinHeight="34"
+                                 Padding="8,5"
+                                 VerticalContentAlignment="Center"
+                                 Margin="0"
+                                 ToolTip="자동 생성 간격" />
+                    </UniformGrid>
+                    <Button Content="생성"
+                            Click="ApplyLayout_Click"
+                            HorizontalAlignment="Stretch"
+                            Margin="0,0,0,8" />
+
+                    <TextBlock x:Name="LayoutSummaryText"
+                               Foreground="#55514A"
+                               Margin="0,0,0,0" />
                     </StackPanel>
                     </Border>
 
                     <Border x:Name="PanelSectionBorder" Style="{StaticResource InspectorSection}">
                     <StackPanel>
-                    <TextBlock Text="칸" Style="{StaticResource SectionHeader}" />
+                    <TextBlock Text="페이지 내 칸" Style="{StaticResource SectionHeader}" />
 
-                    <TextBlock Text="선택한 칸"
-                               FontWeight="SemiBold"
-                               Foreground="{StaticResource TextBrush}"
-                               Margin="0,0,0,8" />
                     <ListBox x:Name="PanelListBox"
                              MinHeight="100"
                              MaxHeight="170"
@@ -145,8 +182,10 @@
                                 Click="MovePanelDown_Click"
                                 Margin="0" />
                     </UniformGrid>
+                    <!-- 칸이 선택되지 않으면 아래 옵션을 숨긴다(리스트만 표시). -->
+                    <StackPanel x:Name="PanelEditControls" Visibility="Collapsed">
                     <CheckBox x:Name="PanelLockCheckBox"
-                              Content="고정 (선택·이동 잠금)"
+                              Content="잠금 (선택·이동 막기)"
                               IsChecked="False"
                               Checked="PanelLockCheckBox_Changed"
                               Unchecked="PanelLockCheckBox_Changed"
@@ -156,54 +195,14 @@
                               IsChecked="False"
                               Checked="PanelCornerModeCheckBox_Changed"
                               Unchecked="PanelCornerModeCheckBox_Changed"
-                              Margin="0,0,0,16" />
-
-                    <TextBlock Text="칸 구성 / 여백 / 간격"
-                               Foreground="#55514A"
-                               Margin="0,0,0,6" />
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                        <TextBox x:Name="LayoutPatternTextBox"
-                                 Text="1,2,1"
-                                 Width="116"
-                                 MinHeight="34"
-                                 Padding="8,5"
-                                 VerticalContentAlignment="Center"
-                                 ToolTip="칸 구성 (예: 1,2,1)" />
-                        <TextBox x:Name="AutoMarginTextBox"
-                                 Text="24"
-                                 Width="56"
-                                 MinHeight="34"
-                                 Padding="8,5"
-                                 VerticalContentAlignment="Center"
-                                 Margin="8,0,0,0"
-                                 ToolTip="자동 생성 여백" />
-                        <TextBox x:Name="AutoGutterTextBox"
-                                 Text="14"
-                                 Width="56"
-                                 MinHeight="34"
-                                 Padding="8,5"
-                                 VerticalContentAlignment="Center"
-                                 Margin="8,0,0,0"
-                                 ToolTip="자동 생성 간격" />
+                              Margin="0,0,0,0" />
                     </StackPanel>
-                    <Button Content="생성"
-                            Click="ApplyLayout_Click"
-                            HorizontalAlignment="Stretch"
-                            Margin="0,0,0,8" />
-
-                    <TextBlock x:Name="LayoutSummaryText"
-                               Foreground="#55514A"
-                               Margin="0,0,0,0" />
                     </StackPanel>
                     </Border>
 
                     <Border x:Name="ImageSectionBorder" Style="{StaticResource InspectorSection}">
                     <StackPanel>
-                    <TextBlock Text="이미지" Style="{StaticResource SectionHeader}" />
-                    <TextBlock Text="선택한 칸의 이미지"
-                               FontWeight="SemiBold"
-                               Foreground="{StaticResource TextBrush}"
-                               Margin="0,0,0,8" />
+                    <TextBlock Text="선택한 칸 내 이미지" Style="{StaticResource SectionHeader}" />
                     <ListBox x:Name="ImageListBox"
                              MinHeight="86"
                              MaxHeight="150"
@@ -223,18 +222,21 @@
                                 Click="MoveImageDown_Click"
                                 Margin="0" />
                     </UniformGrid>
+                    <!-- 이미지가 선택되지 않으면 아래 옵션을 숨긴다(리스트만 표시). -->
+                    <StackPanel x:Name="ImageEditControls" Visibility="Collapsed">
+                    <CheckBox x:Name="ImageLockCheckBox"
+                              Content="잠금 (선택·이동 막기)"
+                              IsChecked="False"
+                              Checked="ImageLockCheckBox_Changed"
+                              Unchecked="ImageLockCheckBox_Changed"
+                              Margin="0,0,0,8" />
                     <CheckBox x:Name="ImageCropCheckBox"
                               Content="칸 경계에서 자르기"
                               IsChecked="True"
                               Checked="ImageCropCheckBox_Changed"
                               Unchecked="ImageCropCheckBox_Changed"
-                              Margin="0,0,0,8" />
-                    <CheckBox x:Name="ImageLockCheckBox"
-                              Content="고정 (선택·이동 잠금)"
-                              IsChecked="False"
-                              Checked="ImageLockCheckBox_Changed"
-                              Unchecked="ImageLockCheckBox_Changed"
                               Margin="0,0,0,18" />
+                    </StackPanel>
 
                     <StackPanel Visibility="Collapsed">
                         <TextBlock Text="칸 위치와 크기"
@@ -275,11 +277,7 @@
 
                     <Border x:Name="BubbleSectionBorder" Style="{StaticResource InspectorSection}">
                     <StackPanel>
-                    <TextBlock Text="말풍선" Style="{StaticResource SectionHeader}" />
-                    <TextBlock Text="선택한 칸의 말풍선"
-                               FontWeight="SemiBold"
-                               Foreground="{StaticResource TextBrush}"
-                               Margin="0,0,0,8" />
+                    <TextBlock Text="선택한 칸 내 말풍선" Style="{StaticResource SectionHeader}" />
                     <ListBox x:Name="BubbleListBox"
                              MinHeight="86"
                              MaxHeight="150"
@@ -299,24 +297,39 @@
                                 Click="MoveBubbleDown_Click"
                                 Margin="0" />
                     </UniformGrid>
+                    <!-- 말풍선이 선택되지 않으면 아래 편집 옵션 전체를 숨긴다(리스트만 표시). -->
+                    <StackPanel x:Name="BubbleEditControls" Visibility="Collapsed">
+                    <CheckBox x:Name="BubbleLockCheckBox"
+                              Content="잠금 (선택·이동 막기)"
+                              IsChecked="False"
+                              Checked="BubbleLockCheckBox_Changed"
+                              Unchecked="BubbleLockCheckBox_Changed"
+                              Margin="0,0,0,8" />
                     <CheckBox x:Name="BubbleCropCheckBox"
                               Content="칸 경계에서 자르기"
                               IsChecked="True"
                               Checked="BubbleCropCheckBox_Changed"
                               Unchecked="BubbleCropCheckBox_Changed"
                               Margin="0,0,0,8" />
-                    <CheckBox x:Name="BubbleLockCheckBox"
-                              Content="고정 (선택·이동 잠금)"
-                              IsChecked="False"
-                              Checked="BubbleLockCheckBox_Changed"
-                              Unchecked="BubbleLockCheckBox_Changed"
-                              Margin="0,0,0,8" />
-                    <CheckBox x:Name="BubbleOutlineCheckBox"
-                              Content="글자 아웃라인"
-                              IsChecked="False"
-                              Checked="BubbleOutlineCheckBox_Changed"
-                              Unchecked="BubbleOutlineCheckBox_Changed"
-                              Margin="0,0,0,8" />
+                    <TextBlock Text="말풍선 텍스트"
+                               Foreground="#55514A"
+                               Margin="0,0,0,6" />
+                    <TextBox x:Name="SelectedBubbleTextBox"
+                             AcceptsReturn="True"
+                             TextWrapping="Wrap"
+                             MinHeight="74"
+                             Padding="8"
+                             TextChanged="SelectedBubbleTextBox_TextChanged"
+                             Margin="0,0,0,12" />
+
+                    <TextBlock x:Name="BubbleFontText" Foreground="#55514A" />
+                    <Slider x:Name="BubbleFontSlider"
+                            Minimum="12"
+                            Maximum="34"
+                            Value="18"
+                            ValueChanged="BubbleSlider_ValueChanged"
+                            Margin="0,4,0,12" />
+
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
                         <TextBlock Text="글자색"
                                    Width="64"
@@ -327,15 +340,6 @@
                                   SelectionChanged="BubbleFillColorComboBox_SelectionChanged" />
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
-                        <TextBlock Text="아웃라인색"
-                                   Width="64"
-                                   VerticalAlignment="Center"
-                                   Foreground="#55514A" />
-                        <ComboBox x:Name="BubbleStrokeColorComboBox"
-                                  Width="130"
-                                  SelectionChanged="BubbleStrokeColorComboBox_SelectionChanged" />
-                    </StackPanel>
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
                         <TextBlock Text="배경색"
                                    Width="64"
                                    VerticalAlignment="Center"
@@ -344,21 +348,21 @@
                                   Width="130"
                                   SelectionChanged="BubbleBackgroundColorComboBox_SelectionChanged" />
                     </StackPanel>
-
-                    <TextBlock x:Name="SelectedBubbleText"
-                               Foreground="#55514A"
-                               Margin="0,0,0,10" />
-
-                    <TextBlock Text="선택한 말풍선 텍스트"
-                               Foreground="#55514A"
-                               Margin="0,0,0,6" />
-                    <TextBox x:Name="SelectedBubbleTextBox"
-                             AcceptsReturn="True"
-                             TextWrapping="Wrap"
-                             MinHeight="74"
-                             Padding="8"
-                             TextChanged="SelectedBubbleTextBox_TextChanged"
-                             Margin="0,0,0,12" />
+                    <CheckBox x:Name="BubbleOutlineCheckBox"
+                              Content="글자 아웃라인"
+                              IsChecked="False"
+                              Checked="BubbleOutlineCheckBox_Changed"
+                              Unchecked="BubbleOutlineCheckBox_Changed"
+                              Margin="0,0,0,8" />
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                        <TextBlock Text="아웃라인색"
+                                   Width="64"
+                                   VerticalAlignment="Center"
+                                   Foreground="#55514A" />
+                        <ComboBox x:Name="BubbleStrokeColorComboBox"
+                                  Width="130"
+                                  SelectionChanged="BubbleStrokeColorComboBox_SelectionChanged" />
+                    </StackPanel>
 
                     <TextBlock Text="말풍선 모양"
                                Foreground="#55514A"
@@ -413,13 +417,6 @@
                                 ValueChanged="BubbleSlider_ValueChanged"
                                 Margin="0,4,0,8" />
                     </StackPanel>
-                    <TextBlock x:Name="BubbleFontText" Foreground="#55514A" />
-                    <Slider x:Name="BubbleFontSlider"
-                            Minimum="12"
-                            Maximum="34"
-                            Value="18"
-                            ValueChanged="BubbleSlider_ValueChanged"
-                            Margin="0,4,0,8" />
                     <StackPanel Visibility="Collapsed">
                         <TextBlock x:Name="BubbleXText" Foreground="#55514A" />
                         <Slider x:Name="BubbleXSlider"
@@ -437,7 +434,7 @@
                                 Margin="0,4,0,14" />
                     </StackPanel>
 
-                    <TextBlock Text="선택한 말풍선의 꼬리"
+                    <TextBlock Text="말풍선의 꼬리"
                                FontWeight="SemiBold"
                                Foreground="{StaticResource TextBrush}"
                                Margin="0,0,0,8" />
@@ -490,14 +487,11 @@
                             Value="28"
                             ValueChanged="BubbleTailSlider_ValueChanged"
                             Margin="0,4,0,14" />
-
-                    <TextBlock Text="칸과 말풍선은 드래그로 이동하고, 우하단 핸들로 크기를 조절합니다."
-                               TextWrapping="Wrap"
-                               Foreground="#77736A"
-                               Margin="0,0,0,6" />
                     <TextBlock Text="꼬리는 세 점(시작·중간·끝) 핸들로 곡선을 조절합니다. 주황 핸들(중간)을 끌면 곡선이 휩니다."
                                TextWrapping="Wrap"
-                               Foreground="#77736A" />
+                               Foreground="#77736A"
+                               Margin="0,2,0,0" />
+                    </StackPanel>
                     </StackPanel>
                     </Border>
 
@@ -509,28 +503,31 @@
                         <Run FontWeight="Bold" Foreground="#2B6F6A">Ctrl+Z / Ctrl+Y</Run> — 실행취소 / 다시실행
                     </TextBlock>
                     <TextBlock TextWrapping="Wrap" Foreground="#55514A" Margin="0,0,0,5">
+                        <Run FontWeight="Bold" Foreground="#2B6F6A">Ctrl+S</Run> — 현재 파일에 덮어쓰기 저장
+                    </TextBlock>
+                    <TextBlock TextWrapping="Wrap" Foreground="#55514A" Margin="0,0,0,5">
                         <Run FontWeight="Bold" Foreground="#2B6F6A">Esc</Run> — 선택 해제
                     </TextBlock>
                     <TextBlock TextWrapping="Wrap" Foreground="#55514A" Margin="0,0,0,5">
                         <Run FontWeight="Bold" Foreground="#2B6F6A">Delete</Run> — 선택한 이미지·말풍선 삭제
                     </TextBlock>
                     <TextBlock TextWrapping="Wrap" Foreground="#55514A" Margin="0,0,0,5">
-                        <Run FontWeight="Bold" Foreground="#2B6F6A">↑ / ↓</Run> — 선택 대상(칸·이미지·말풍선) 순서 이동 (선택 없으면 페이지 넘김)
+                        <Run FontWeight="Bold" Foreground="#2B6F6A">PgUp / PgDn</Run> — 이전 / 다음 페이지
                     </TextBlock>
                     <TextBlock TextWrapping="Wrap" Foreground="#55514A" Margin="0,0,0,5">
-                        <Run FontWeight="Bold" Foreground="#2B6F6A">마우스 휠</Run> — 페이지 넘김 (말풍선 위: 크기 조절 · 이미지 위: 확대/축소)
+                        <Run FontWeight="Bold" Foreground="#2B6F6A">↑ / ↓</Run> — 선택 대상(칸·이미지·말풍선) 순서 이동
                     </TextBlock>
                     <TextBlock TextWrapping="Wrap" Foreground="#55514A" Margin="0,0,0,5">
-                        <Run FontWeight="Bold" Foreground="#2B6F6A">Ctrl+L</Run> — 선택 오브젝트 고정/해제
+                        <Run FontWeight="Bold" Foreground="#2B6F6A">마우스 휠</Run> — 크기 조절
                     </TextBlock>
                     <TextBlock TextWrapping="Wrap" Foreground="#55514A" Margin="0,0,0,5">
-                        <Run FontWeight="Bold" Foreground="#2B6F6A">Ctrl+0 / Ctrl+R</Run> — 선택 리셋 (이미지=100%+좌상단 · 칸=기본 사각형 · 말풍선=텍스트 여백)
+                        <Run FontWeight="Bold" Foreground="#2B6F6A">L</Run> — 선택 오브젝트 잠금/해제
                     </TextBlock>
                     <TextBlock TextWrapping="Wrap" Foreground="#55514A" Margin="0,0,0,5">
-                        <Run FontWeight="Bold" Foreground="#2B6F6A">Ctrl+클릭</Run> — 고정된 오브젝트도 선택
+                        <Run FontWeight="Bold" Foreground="#2B6F6A">Ctrl+R</Run> — 선택 리셋 (이미지=100%+좌상단 · 칸=기본 사각형 · 말풍선=텍스트 여백)
                     </TextBlock>
-                    <TextBlock TextWrapping="Wrap" Foreground="#77736A">
-                        커서를 올리면 클릭할 대상을 툴팁으로 보여줍니다.
+                    <TextBlock TextWrapping="Wrap" Foreground="#55514A" Margin="0,0,0,5">
+                        <Run FontWeight="Bold" Foreground="#2B6F6A">Ctrl+클릭</Run> — 잠금된 오브젝트도 선택
                     </TextBlock>
                     </StackPanel>
                     </Border>
@@ -559,7 +556,9 @@
                           HorizontalScrollBarVisibility="Auto"
                           VerticalScrollBarVisibility="Auto"
                           Padding="28"
+                          Background="Transparent"
                           SizeChanged="PageScrollViewer_SizeChanged"
+                          PreviewMouseLeftButtonDown="PageScrollViewer_PreviewMouseLeftButtonDown"
                           PreviewMouseWheel="PageScrollViewer_PreviewMouseWheel">
                 <Border x:Name="PageFrame"
                         Background="#FFFFFF"

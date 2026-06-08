@@ -52,6 +52,8 @@ public partial class MainWindow : Window
     private readonly List<ComicPageData> _pages = new();
     private int _currentPageIndex;
     private string? _projectBaseDirectory;
+    // 현재 불러왔거나 저장한 프로젝트 파일 전체 경로(Ctrl+S 덮어쓰기 대상). 없으면 다른 이름으로 저장.
+    private string? _projectFilePath;
     // 꼬리 편집용 세 점 핸들은 칸 경계 클리핑을 피하기 위해 페이지 레이어(PageOverlay)에
     // 올려 두는 싱글톤이다. 선택된 말풍선의 선택된 꼬리에만 표시된다.
     private Thumb? _tailStartHandle;
@@ -67,14 +69,13 @@ public partial class MainWindow : Window
     private Thumb? _textRegionBottomRight;
     // 칸 사변형 모서리 조절 핸들(싱글톤, PageOverlay). 인덱스 0=TL,1=TR,2=BR,3=BL.
     private Thumb[]? _panelCornerHandles;
+    // 포터블: 설정·자동저장을 실행 파일과 같은 폴더에 둔다(단일 파일 게시에서도 exe 폴더를 가리킴).
     private readonly string _windowSettingsPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "KomaForge",
+        AppContext.BaseDirectory,
         "window-settings.json");
     // 작업 내용 자동 저장(다음 실행 시 자동 복원). 명시적 저장/불러오기와는 별개.
     private readonly string _autosavePath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "KomaForge",
+        AppContext.BaseDirectory,
         "autosave.nvjson");
 
     public MainWindow()
@@ -152,21 +153,36 @@ public partial class MainWindow : Window
                 return;
             }
 
-            // Ctrl+L: 활성 선택(칸/이미지/말풍선) 고정 토글.
-            if (e.Key == Key.L)
+            // Ctrl+S: 현재 파일에 덮어쓰기 저장(경로 없으면 다른 이름으로 저장).
+            if (e.Key == Key.S)
             {
-                ToggleSelectedLock();
+                SaveProjectToCurrentOrPrompt();
                 e.Handled = true;
                 return;
             }
 
-            // Ctrl+0 / Ctrl+R: 선택 대상 리셋(이미지=100% 원본, 칸=기본 사각형).
-            if (e.Key == Key.D0 || e.Key == Key.NumPad0 || e.Key == Key.R)
+            // Ctrl+R: 선택 대상 리셋(이미지=100% 원본, 칸=기본 사각형).
+            if (e.Key == Key.R)
             {
                 ResetSelectedToDefault();
                 e.Handled = true;
                 return;
             }
+        }
+
+        // L: 선택 오브젝트 잠금 토글.
+        // 텍스트 입력 중이거나 수정자 키(Ctrl/Alt)와 함께일 때는 단축키로 동작하지 않는다.
+        if (e.Key == Key.L &&
+            (Keyboard.Modifiers & (ModifierKeys.Control | ModifierKeys.Alt)) == 0)
+        {
+            if (Keyboard.FocusedElement is TextBox)
+            {
+                return; // 글자 입력으로 둔다.
+            }
+
+            ToggleSelectedLock();
+            e.Handled = true;
+            return;
         }
 
         if (e.Key == Key.Escape)
@@ -191,6 +207,19 @@ public partial class MainWindow : Window
             return;
         }
 
+        // PgUp / PgDn: 인스펙터·선택과 무관하게 페이지 넘김(텍스트 입력 중엔 제외).
+        if (e.Key == Key.PageUp || e.Key == Key.PageDown)
+        {
+            if (Keyboard.FocusedElement is TextBox)
+            {
+                return;
+            }
+
+            NavigatePage(e.Key == Key.PageUp ? -1 : 1);
+            e.Handled = true;
+            return;
+        }
+
         if (e.Key == Key.Up || e.Key == Key.Down)
         {
             if (Keyboard.FocusedElement is TextBox)
@@ -200,6 +229,15 @@ public partial class MainWindow : Window
 
             var direction = e.Key == Key.Up ? -1 : 1;
 
+            // 인스펙터가 닫혀 있으면 위/아래 키로 페이지를 넘긴다(선택 상태와 무관).
+            if (!IsInspectorOpen())
+            {
+                NavigatePage(direction);
+                e.Handled = true;
+                return;
+            }
+
+            // 인스펙터가 열려 있으면 선택 대상의 순서를 위/아래로 옮긴다.
             switch (_selectionKind)
             {
                 case SelectionKind.Bubble when _selectedBubble != null:
@@ -215,12 +253,10 @@ public partial class MainWindow : Window
                     e.Handled = true;
                     return;
             }
-
-            // 선택된 것이 없으면 위/아래 키로 페이지를 넘긴다.
-            NavigatePage(direction);
-            e.Handled = true;
         }
     }
+
+    private bool IsInspectorOpen() => InspectorPanel.Visibility == Visibility.Visible;
 
     private void ApplyLayout_Click(object sender, RoutedEventArgs e)
     {
@@ -380,14 +416,41 @@ public partial class MainWindow : Window
         InspectorPanel.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
         InspectorColumn.Width = show ? new GridLength(_inspectorWidth) : new GridLength(0);
         InspectorToggleButton.Content = show ? "◀" : "▶";
+
+        // 인스펙터를 닫으면 뷰어 모드: 모든 선택을 해제한다(닫힌 동안 선택 불가).
+        if (!show)
+        {
+            ClearSelection();
+        }
         // 인스펙터를 접으면 페이지 영역 너비가 바뀌므로 쪽 맞춤을 다시 계산한다
         // (ScrollViewer SizeChanged로도 갱신되지만 즉시 반영을 위해 호출).
         UpdatePageFit();
     }
 
+    private void PageScrollViewer_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        // 페이지(PageSurface) 밖 — 스크롤뷰어 여백 — 을 클릭하면 선택 해제.
+        if (!IsInspectorOpen()) return; // 뷰어 모드에서는 어차피 선택이 없다.
+        var node = e.OriginalSource as DependencyObject;
+        while (node != null)
+        {
+            if (ReferenceEquals(node, PageSurface)) return; // 페이지 안 → 페이지 핸들러가 처리.
+            node = VisualTreeHelper.GetParent(node);
+        }
+        ClearSelection();
+    }
+
     private void PageScrollViewer_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
     {
-        // 말풍선 위에서는 휠로 말풍선 크기를 확대/축소한다.
+        // 인스펙터가 닫혀 있으면 휠은 항상 페이지 넘김(선택/위치와 무관).
+        if (!IsInspectorOpen())
+        {
+            NavigatePage(e.Delta > 0 ? -1 : 1);
+            e.Handled = true;
+            return;
+        }
+
+        // 인스펙터가 열려 있으면: 말풍선 위에서는 휠로 말풍선 크기를 확대/축소한다.
         var bubble = FindBubbleAt(e.OriginalSource as DependencyObject);
         if (bubble != null)
         {
@@ -395,16 +458,8 @@ public partial class MainWindow : Window
             return;
         }
 
-        // 이미지가 선택된 칸 위에서는 휠로 이미지 확대/축소(기존 기능)를 유지한다.
-        var panel = FindPanelAt(e.OriginalSource);
-        if (panel?.SelectedImage != null && !IsInsideBubble(e.OriginalSource as DependencyObject))
-        {
-            return;
-        }
-
-        // 그 외에는 휠 위/아래로 페이지를 넘긴다.
-        NavigatePage(e.Delta > 0 ? -1 : 1);
-        e.Handled = true;
+        // 이미지가 선택된 칸 위에서는 휠로 이미지 확대/축소(frame의 ZoomPanelImage가 처리하도록 둔다).
+        // 그 외 빈 영역에서는 페이지를 넘기지 않고 ScrollViewer 기본 스크롤에 맡긴다.
     }
 
     // 마우스 위치의 칸을 비주얼 트리에서 거슬러 올라가 찾는다.
@@ -462,7 +517,8 @@ public partial class MainWindow : Window
         {
             Title = ComicTitleTextBox.Text.Trim(),
             CurrentPageIndex = _currentPageIndex,
-            // 절대 경로로 저장해 다음 실행/자동 복원 때도 이미지가 그대로 열리게 한다.
+            // 이미지가 실행 파일 폴더(또는 하위)면 상대 경로로, 아니면 절대 경로로 저장한다.
+            // → 실행 파일·자동저장을 이미지와 함께 옮겨도 다음 실행 때 그대로 열린다.
             Pages = CaptureProjectPages(null)
         };
         return JsonSerializer.Serialize(project);
@@ -880,13 +936,32 @@ public partial class MainWindow : Window
 
     private void SaveProject_Click(object sender, RoutedEventArgs e)
     {
+        SaveProjectAs();
+    }
+
+    // Ctrl+S: 현재 불러왔거나 저장한 파일에 덮어쓰기 저장. 경로가 없으면 다른 이름으로 저장 대화상자.
+    private void SaveProjectToCurrentOrPrompt()
+    {
+        if (!string.IsNullOrWhiteSpace(_projectFilePath))
+        {
+            SaveProjectToFile(_projectFilePath!);
+            return;
+        }
+
+        SaveProjectAs();
+    }
+
+    private void SaveProjectAs()
+    {
         SaveCurrentPageState();
 
         var dialog = new SaveFileDialog
         {
             Title = "프로젝트 저장",
             Filter = "KomaForge 프로젝트 (*.nvjson)|*.nvjson|JSON 파일 (*.json)|*.json",
-            FileName = GetDefaultProjectFileName()
+            FileName = string.IsNullOrWhiteSpace(_projectFilePath)
+                ? GetDefaultProjectFileName()
+                : Path.GetFileName(_projectFilePath)
         };
 
         if (dialog.ShowDialog(this) != true)
@@ -894,18 +969,34 @@ public partial class MainWindow : Window
             return;
         }
 
+        SaveProjectToFile(dialog.FileName);
+    }
+
+    private void SaveProjectToFile(string fileName)
+    {
+        SaveCurrentPageState();
+
         var project = new ComicProjectData
         {
             Title = ComicTitleTextBox.Text.Trim(),
             AutoMargin = ParseDoubleOr(AutoMarginTextBox.Text, 24),
             AutoGutter = ParseDoubleOr(AutoGutterTextBox.Text, 14),
             CurrentPageIndex = _currentPageIndex,
-            Pages = CaptureProjectPages(Path.GetDirectoryName(dialog.FileName))
+            Pages = CaptureProjectPages(Path.GetDirectoryName(fileName))
         };
-        var json = JsonSerializer.Serialize(project, new JsonSerializerOptions { WriteIndented = true });
-        File.WriteAllText(dialog.FileName, json);
-        _projectBaseDirectory = Path.GetDirectoryName(dialog.FileName);
-        UpdateStatus("프로젝트를 저장했습니다.");
+
+        try
+        {
+            var json = JsonSerializer.Serialize(project, new JsonSerializerOptions { WriteIndented = true });
+            File.WriteAllText(fileName, json);
+            _projectFilePath = fileName;
+            _projectBaseDirectory = Path.GetDirectoryName(fileName);
+            UpdateStatus("프로젝트를 저장했습니다.");
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"프로젝트를 저장할 수 없습니다.\n\n{ex.Message}", "오류", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
 
     private void LoadProject_Click(object sender, RoutedEventArgs e)
@@ -932,6 +1023,7 @@ public partial class MainWindow : Window
             }
 
             _projectBaseDirectory = Path.GetDirectoryName(dialog.FileName);
+            _projectFilePath = dialog.FileName;
             ComicTitleTextBox.Text = project.Title;
             AutoMarginTextBox.Text = $"{project.AutoMargin:0}";
             AutoGutterTextBox.Text = $"{project.AutoGutter:0}";
@@ -1716,7 +1808,7 @@ public partial class MainWindow : Window
                 {
                     copiedPanel.Images.Add(new PanelImageData
                     {
-                        Path = MakeRelativePath(projectDirectory, image.Path),
+                        Path = MakeStorablePath(image.Path, projectDirectory),
                         Scale = image.Scale,
                         TranslateX = image.TranslateX,
                         TranslateY = image.TranslateY,
@@ -2259,8 +2351,8 @@ public partial class MainWindow : Window
     {
         EnsureHoverPopup();
 
-        // 마우스가 페이지 위가 아니거나 드래그 중이면 숨긴다.
-        if (!PageSurface.IsMouseOver || _isDraggingPanel || _isDraggingBubble || _isDraggingPanelImage)
+        // 뷰어 모드(인스펙터 닫힘)·페이지 밖·드래그 중에는 숨긴다(어차피 선택 불가).
+        if (!IsInspectorOpen() || !PageSurface.IsMouseOver || _isDraggingPanel || _isDraggingBubble || _isDraggingPanelImage)
         {
             _hoverPopup!.IsOpen = false;
             return;
@@ -2423,6 +2515,11 @@ public partial class MainWindow : Window
     // Ctrl+클릭: 고정된 오브젝트도 선택할 수 있게, 페이지 좌표에서 직접 위쪽부터 찾아 선택한다.
     private void PageSurface_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
+        if (!IsInspectorOpen())
+        {
+            return; // 뷰어 모드: 선택하지 않는다.
+        }
+
         if ((Keyboard.Modifiers & ModifierKeys.Control) != ModifierKeys.Control)
         {
             return; // 일반 클릭은 기존 흐름대로.
@@ -2501,6 +2598,11 @@ public partial class MainWindow : Window
 
     private void BeginPanelDrag(ComicPanel panel, MouseButtonEventArgs e)
     {
+        if (!IsInspectorOpen())
+        {
+            return; // 뷰어 모드: 칸/이미지 선택·이동 안 함.
+        }
+
         // 말풍선/리사이즈 핸들 위 클릭은 각자(말풍선 자체 이벤트, 리사이즈 핸들)가 선택을 처리한다.
         // 단일 선택을 위해 여기서 칸을 함께 선택하지 않는다.
         if (IsInsideResizeHandle(e.OriginalSource as DependencyObject) || IsInsideBubble(e.OriginalSource as DependencyObject))
@@ -2534,15 +2636,13 @@ public partial class MainWindow : Window
             return;
         }
 
+        // 테두리든, 이미지가 없는 빈 영역이든 칸 자체를 드래그로 이동한다.
         SelectPanel(panel);
         ScrollInspectorToSection();
-        if (onBorder)
-        {
-            _isDraggingPanel = true;
-            _dragStart = point;
-            panel.Frame.CaptureMouse();
-            e.Handled = true;
-        }
+        _isDraggingPanel = true;
+        _dragStart = point;
+        panel.Frame.CaptureMouse();
+        e.Handled = true;
     }
 
     private void DragPanel(ComicPanel panel, MouseEventArgs e)
@@ -2695,6 +2795,11 @@ public partial class MainWindow : Window
 
     private void BeginBubbleDrag(SpeechBubble bubble, MouseButtonEventArgs e)
     {
+        if (!IsInspectorOpen())
+        {
+            return; // 뷰어 모드: 말풍선 선택·이동 안 함.
+        }
+
         SelectBubble(bubble);
         ScrollInspectorToSection();
         if (IsInsideResizeHandle(e.OriginalSource as DependencyObject))
@@ -3293,10 +3398,6 @@ public partial class MainWindow : Window
 
     private void UpdateSelectionLabels()
     {
-        SelectedBubbleText.Text = _selectedBubble == null
-            ? "선택한 말풍선 없음"
-            : "선택한 말풍선 조절 중";
-
         if (_selectedBubble == null && SelectedBubbleTextBox != null)
         {
             _isLoadingInspector = true;
@@ -3500,6 +3601,19 @@ public partial class MainWindow : Window
         SetSectionHighlight(PanelSectionBorder, _selectionKind == SelectionKind.Panel);
         SetSectionHighlight(ImageSectionBorder, _selectionKind == SelectionKind.Image);
         SetSectionHighlight(BubbleSectionBorder, _selectionKind == SelectionKind.Bubble);
+
+        // 각 섹션의 리스트 아래 옵션은 그 섹션의 오브젝트가 선택됐을 때만 표시(아니면 리스트만).
+        SetVisible(PanelEditControls, _selectionKind == SelectionKind.Panel);
+        SetVisible(ImageEditControls, _selectionKind == SelectionKind.Image);
+        SetVisible(BubbleEditControls, _selectionKind == SelectionKind.Bubble);
+    }
+
+    private static void SetVisible(UIElement? element, bool visible)
+    {
+        if (element != null)
+        {
+            element.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        }
     }
 
     private static void SetSectionHighlight(Border? section, bool selected)
@@ -4084,30 +4198,55 @@ public partial class MainWindow : Window
         UpdateMergedBubbleOutlines();
     }
 
-    // 말풍선마다 독립적인 채움/외곽선(ShapePath)을 갱신한다. 배경색을 따로 줄 수 있도록 병합하지 않는다.
+    // 채움은 말풍선별 ShapePath가(배경색을 따로 줄 수 있게), 외곽선은 칸 단위로 합쳐(Union) 그린다.
+    // 이렇게 하면 겹친 말풍선들의 경계선이 하나로 이어져 도형이 합쳐진 것처럼 보인다.
     private void UpdateMergedBubbleOutlines()
     {
         foreach (var panel in _panels)
         {
-            // 더 이상 쓰지 않는 칸 단위 병합 경로는 비워 둔다(말풍선별 경로가 대신한다).
+            // 채움은 말풍선별 ShapePath가 담당하므로 칸 단위 채움 경로는 비운다.
             panel.BubbleFillPath.Data = null;
-            panel.BubbleOutlinePath.Data = null;
             panel.FreeBubbleFillPath.Data = null;
-            panel.FreeBubbleOutlinePath.Data = null;
 
             foreach (var bubble in panel.Bubbles)
             {
                 UpdateBubbleShapePath(bubble);
             }
+
+            // 외곽선은 크롭 ON/OFF 그룹별로 합쳐 그린다(크롭 ON은 칸 오버레이라 사변형으로 클리핑됨).
+            panel.BubbleOutlinePath.Data = BuildMergedBubbleOutline(panel, cropped: true);
+            panel.FreeBubbleOutlinePath.Data = BuildMergedBubbleOutline(panel, cropped: false);
         }
+    }
+
+    // 한 칸의 같은 크롭 그룹 말풍선들의 본체+꼬리 도형을 모두 Union으로 합친 외곽선 도형을 만든다.
+    private static Geometry? BuildMergedBubbleOutline(ComicPanel panel, bool cropped)
+    {
+        Geometry? merged = null;
+        foreach (var bubble in panel.Bubbles)
+        {
+            if (bubble.IsCropped != cropped)
+            {
+                continue;
+            }
+
+            var geometry = BuildBubbleOverlayGeometry(bubble);
+            if (geometry == null)
+            {
+                continue;
+            }
+
+            merged = merged == null
+                ? geometry
+                : Geometry.Combine(merged, geometry, GeometryCombineMode.Union, null);
+        }
+
+        return merged;
     }
 
     // 한 말풍선의 본체+꼬리 도형을 오버레이 좌표로 만들어 ShapePath에 적용하고 배경색을 입힌다.
     private static void UpdateBubbleShapePath(SpeechBubble bubble)
     {
-        var left = GetCanvasLeft(bubble.Container);
-        var top = GetCanvasTop(bubble.Container);
-
         // 선 효과는 대사를 숨기고, 일반 말풍선은 보인다.
         bubble.TextBlock.Visibility = IsLineEffectShape(bubble.Shape) ? Visibility.Collapsed : Visibility.Visible;
         // 선 효과가 아닐 때는 선 호스트를 비운다.
@@ -4124,8 +4263,6 @@ public partial class MainWindow : Window
             bubble.ShapePath.Clip = null;
             return;
         }
-
-        var offset = new TranslateTransform(left, top);
 
         // 선 효과(집중선/속도선): 선마다 개별 Path로(컨테이너 안 선 호스트) 그려 각 선이 자기 시작점부터 페이드되게 한다.
         // 선 호스트는 컨테이너 로컬 좌표라 위치 변경 시 자동으로 따라온다 → 크기/모양/돌기/강도/색이 바뀔 때만 재생성한다.
@@ -4153,7 +4290,25 @@ public partial class MainWindow : Window
             return;
         }
 
-        // 일반 말풍선: 꼬리마다 개별로 본체에 합치거나(밖으로 튀어나옴) 빼서(안으로 깎임) 한 도형으로 만든다.
+        // 일반 말풍선: 본체+꼬리를 합친 도형에 배경색 채움만 칠한다.
+        // 외곽선(테두리)은 칸 단위 병합 경로(BubbleOutlinePath)가 그려, 겹친 말풍선의 경계선이 하나로 이어진다.
+        bubble.ShapePath.Data = BuildBubbleOverlayGeometry(bubble);
+        bubble.ShapePath.Fill = bubble.BackgroundBrush;
+        bubble.ShapePath.Stroke = Brushes.Transparent;
+        bubble.ShapePath.StrokeThickness = 0;
+        bubble.ShapePath.Clip = null;
+    }
+
+    // 말풍선 본체+꼬리(안으로 깎기 포함)를 오버레이 좌표의 한 도형으로 만든다.
+    // 선 효과/테두리 없음은 본체 도형이 없으므로 null.
+    private static Geometry? BuildBubbleOverlayGeometry(SpeechBubble bubble)
+    {
+        if (bubble.BodyPath.Data == null || IsLineEffectShape(bubble.Shape))
+        {
+            return null;
+        }
+
+        var offset = new TranslateTransform(GetCanvasLeft(bubble.Container), GetCanvasTop(bubble.Container));
         Geometry shape = bubble.BodyPath.Data.Clone();
         shape.Transform = offset;
         foreach (var tail in bubble.Tails)
@@ -4164,11 +4319,7 @@ public partial class MainWindow : Window
             shape = Geometry.Combine(shape, tailGeometry, tailMode, null);
         }
 
-        bubble.ShapePath.Data = shape;
-        bubble.ShapePath.Fill = bubble.BackgroundBrush;
-        bubble.ShapePath.Stroke = Brushes.Black;
-        bubble.ShapePath.StrokeThickness = 2;
-        bubble.ShapePath.Clip = null;
+        return shape;
     }
 
     private static Geometry CreateTailGeometry(BubbleTail tail)
@@ -5021,7 +5172,7 @@ public partial class MainWindow : Window
 
     private static bool IsOnPanelBorder(ComicPanel panel, Point point)
     {
-        const double borderHitSize = 12;
+        const double borderHitSize = 18;
         var width = panel.Frame.ActualWidth;
         var height = panel.Frame.ActualHeight;
 
@@ -5040,9 +5191,23 @@ public partial class MainWindow : Window
 
     private static PanelImage? FindImageAtPoint(ComicPanel panel, Point panelPoint, bool includeLocked = false)
     {
+        // 실제 화면 z-순서: 크롭 OFF 이미지(FreeImageCanvas)가 크롭 ON 이미지(ImageCanvas)보다 항상 앞에 있다.
+        // 각 그룹 안에서는 panel.Images의 뒤쪽(높은 인덱스)이 위에 온다.
+        // 따라서 크롭 OFF 그룹을 위에서부터 먼저 보고, 없으면 크롭 ON 그룹을 본다.
+        return FindImageAtPointInGroup(panel, panelPoint, includeLocked, cropped: false)
+            ?? FindImageAtPointInGroup(panel, panelPoint, includeLocked, cropped: true);
+    }
+
+    private static PanelImage? FindImageAtPointInGroup(ComicPanel panel, Point panelPoint, bool includeLocked, bool cropped)
+    {
         for (var index = panel.Images.Count - 1; index >= 0; index--)
         {
             var image = panel.Images[index];
+            if (image.IsCropped != cropped)
+            {
+                continue;
+            }
+
             if (image.IsLocked && !includeLocked)
             {
                 continue;
@@ -5059,6 +5224,17 @@ public partial class MainWindow : Window
 
     private static bool IsOpaqueImagePixelAtPoint(PanelImage image, Point panelPoint)
     {
+        // 크롭 ON 이미지는 칸 사변형 밖에서는 화면에 잘려 보이지 않으므로 클릭 대상이 아니다.
+        // (확대해 칸 밖으로 넘친 부분이 클릭을 가로채던 문제를 방지한다.)
+        if (image.IsCropped)
+        {
+            var clip = CreatePanelQuadGeometry(image.OwnerPanel);
+            if (!clip.FillContains(panelPoint))
+            {
+                return false;
+            }
+        }
+
         var content = image.Content;
         var transform = content.TransformToAncestor(image.OwnerPanel.Frame);
         var inverse = transform.Inverse;
@@ -5223,30 +5399,74 @@ public partial class MainWindow : Window
         return image;
     }
 
+    // 상대 경로 해석: 수동 불러오기면 저장 파일 폴더를 먼저, 그 다음 실행 파일 폴더 기준으로 찾는다.
+    // (자동저장 복원 시에는 _projectBaseDirectory가 없어 실행 파일 폴더만 본다.) 절대 경로는 그대로 쓴다.
     private string ResolveProjectPath(string path)
     {
-        if (Path.IsPathFullyQualified(path) || string.IsNullOrWhiteSpace(_projectBaseDirectory))
+        if (string.IsNullOrWhiteSpace(path) || Path.IsPathFullyQualified(path))
         {
             return path;
         }
 
-        return Path.GetFullPath(Path.Combine(_projectBaseDirectory, path));
+        string? firstCandidate = null;
+        foreach (var baseDirectory in EnumerateResolveBaseDirectories())
+        {
+            var candidate = Path.GetFullPath(Path.Combine(baseDirectory, path));
+            firstCandidate ??= candidate;
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return firstCandidate!; // 어느 쪽에도 없으면 첫 후보(존재 확인은 호출부에서).
     }
 
-    private static string MakeRelativePath(string? baseDirectory, string path)
+    private IEnumerable<string> EnumerateResolveBaseDirectories()
     {
-        if (string.IsNullOrWhiteSpace(baseDirectory) || !Path.IsPathFullyQualified(path))
+        if (!string.IsNullOrWhiteSpace(_projectBaseDirectory))
         {
-            return path;
+            yield return _projectBaseDirectory!;
         }
 
+        yield return AppContext.BaseDirectory;
+    }
+
+    // 저장용 경로: 기준 폴더(또는 하위)면 그 기준 상대 경로, 그 외엔 절대 경로.
+    // 기준 폴더 — 자동 저장(projectDirectory == null)은 실행 파일 폴더,
+    //             수동 저장은 저장 파일 폴더로 판단한다.
+    private static string MakeStorablePath(string path, string? projectDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path))
+        {
+            return path; // 이미 상대거나 비어 있음.
+        }
+
+        var baseDirectory = string.IsNullOrWhiteSpace(projectDirectory)
+            ? AppContext.BaseDirectory
+            : projectDirectory!;
+
+        return TryMakeRelativeUnder(baseDirectory, path) ?? path;
+    }
+
+    // fullPath가 baseDirectory 또는 그 하위면 상대 경로를, 아니면 null을 반환한다.
+    private static string? TryMakeRelativeUnder(string baseDirectory, string fullPath)
+    {
         try
         {
-            return Path.GetRelativePath(baseDirectory, path);
+            var relative = Path.GetRelativePath(baseDirectory, fullPath);
+            // baseDirectory 밖이면 ".."로 시작하거나 절대 경로가 된다 → 상대화하지 않는다.
+            if (Path.IsPathFullyQualified(relative) ||
+                relative.StartsWith("..", StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            return relative;
         }
         catch
         {
-            return path;
+            return null;
         }
     }
 
