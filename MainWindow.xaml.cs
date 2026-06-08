@@ -76,6 +76,10 @@ public partial class MainWindow : Window
     // 작업 내용 자동 저장(다음 실행 시 자동 복원). 명시적 저장/불러오기와는 별개.
     private readonly string _autosavePath = Path.Combine(
         AppContext.BaseDirectory,
+        "autosave.kfjson");
+    // 옛 이름(NovelViewer 시절)의 자동 저장본 — 새 파일이 없을 때만 복원에 사용.
+    private readonly string _legacyAutosavePath = Path.Combine(
+        AppContext.BaseDirectory,
         "autosave.nvjson");
 
     public MainWindow()
@@ -541,12 +545,16 @@ public partial class MainWindow : Window
     {
         try
         {
-            if (!File.Exists(_autosavePath))
+            // 새 이름이 있으면 그것을, 없으면 옛 이름(autosave.nvjson)을 복원한다.
+            var path = File.Exists(_autosavePath)
+                ? _autosavePath
+                : (File.Exists(_legacyAutosavePath) ? _legacyAutosavePath : null);
+            if (path == null)
             {
                 return;
             }
 
-            RestoreSnapshot(File.ReadAllText(_autosavePath));
+            RestoreSnapshot(File.ReadAllText(path));
             UpdateStatus("이전 작업을 불러왔습니다.");
         }
         catch
@@ -700,7 +708,7 @@ public partial class MainWindow : Window
         var title = ComicTitleTextBox.Text.Trim();
         if (string.IsNullOrEmpty(title))
         {
-            return "KomaForgeProject.nvjson";
+            return "KomaForgeProject.kfjson";
         }
 
         foreach (var invalid in Path.GetInvalidFileNameChars())
@@ -708,7 +716,7 @@ public partial class MainWindow : Window
             title = title.Replace(invalid, '_');
         }
 
-        return title + ".nvjson";
+        return title + ".kfjson";
     }
 
     private void ExportPagesAsImages_Click(object sender, RoutedEventArgs e)
@@ -958,7 +966,7 @@ public partial class MainWindow : Window
         var dialog = new SaveFileDialog
         {
             Title = "프로젝트 저장",
-            Filter = "KomaForge 프로젝트 (*.nvjson)|*.nvjson|JSON 파일 (*.json)|*.json",
+            Filter = "KomaForge 프로젝트 (*.kfjson)|*.kfjson|JSON 파일 (*.json)|*.json",
             FileName = string.IsNullOrWhiteSpace(_projectFilePath)
                 ? GetDefaultProjectFileName()
                 : Path.GetFileName(_projectFilePath)
@@ -1004,7 +1012,7 @@ public partial class MainWindow : Window
         var dialog = new OpenFileDialog
         {
             Title = "프로젝트 불러오기",
-            Filter = "KomaForge 프로젝트 (*.nvjson;*.json)|*.nvjson;*.json|모든 파일 (*.*)|*.*"
+            Filter = "KomaForge 프로젝트 (*.kfjson;*.nvjson;*.json)|*.kfjson;*.nvjson;*.json|모든 파일 (*.*)|*.*"
         };
 
         if (dialog.ShowDialog(this) != true)
