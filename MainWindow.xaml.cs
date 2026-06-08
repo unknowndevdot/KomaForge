@@ -28,6 +28,8 @@ public partial class MainWindow : Window
     private string _lastSnapshot = string.Empty;
     private System.Windows.Threading.DispatcherTimer? _historyTimer;
     private const int MaxHistory = 60;
+    // 입력(마우스·키)이 있을 때만 true가 되어, idle 상태에서 전체 문서를 매 틱 직렬화하는 것을 막는다.
+    private bool _historyDirty;
 
     private readonly List<ComicPanel> _panels = new();
     // 한 번에 하나만 선택된다(칸/이미지/말풍선). _selectedPanel은 이미지·말풍선 선택 시
@@ -96,6 +98,10 @@ public partial class MainWindow : Window
         };
         PreviewKeyDown += MainWindow_PreviewKeyDown;
         PreviewKeyUp += MainWindow_PreviewKeyUp;
+        // 문서를 바꿀 수 있는 모든 상호작용은 마우스/키 입력을 동반하므로, 입력이 있을 때만
+        // 히스토리 타이머가 스냅샷을 뜨도록 dirty 표시한다(idle 시 불필요한 전체 직렬화 방지).
+        PreviewMouseDown += (_, _) => _historyDirty = true;
+        PreviewMouseWheel += (_, _) => _historyDirty = true;
         // 저장된 기본 칸 구성(없으면 입력칸 기본값)으로 첫 페이지를 생성한다.
         CreateLayoutFromPattern(LayoutPatternTextBox.Text);
         _pages.Add(CaptureCurrentPage("Page 1"));
@@ -135,6 +141,8 @@ public partial class MainWindow : Window
 
     private void MainWindow_PreviewKeyDown(object sender, KeyEventArgs e)
     {
+        _historyDirty = true; // 키 입력(텍스트 편집·단축키 등)은 변경 가능성으로 본다.
+
         if (e.Key == Key.LeftCtrl || e.Key == Key.RightCtrl)
         {
             UpdateHoverTooltip(Mouse.DirectlyOver as DependencyObject);
@@ -589,6 +597,13 @@ public partial class MainWindow : Window
             return;
         }
 
+        // 마지막 캡처 이후 입력이 전혀 없었으면 전체 직렬화를 건너뛴다(idle 비용 제거).
+        if (!_historyDirty)
+        {
+            return;
+        }
+
+        _historyDirty = false;
         var snapshot = CaptureSnapshot();
         if (snapshot == _lastSnapshot)
         {
@@ -2416,7 +2431,15 @@ public partial class MainWindow : Window
             // 칸 프레임.
             if (node is Border frameBorder && frameBorder.Tag is int)
             {
-                framePanel = _panels.FirstOrDefault(p => ReferenceEquals(p.Frame, frameBorder));
+                // 핫패스(매 마우스 이동)라 LINQ 할당 없이 직접 순회한다.
+                foreach (var p in _panels)
+                {
+                    if (ReferenceEquals(p.Frame, frameBorder))
+                    {
+                        framePanel = p;
+                        break;
+                    }
+                }
                 break;
             }
 
@@ -2744,6 +2767,9 @@ public partial class MainWindow : Window
             return;
         }
 
+        // 파일 드래그&드롭은 이 창의 마우스다운을 동반하지 않으므로, 히스토리 캡처를 위해 직접 표시한다.
+        _historyDirty = true;
+
         try
         {
             // 드롭 위치(콘텐츠 영역 좌표). 원본 100% 크기로, 이 지점을 중심으로 붙여넣는다.
@@ -2838,10 +2864,15 @@ public partial class MainWindow : Window
         Canvas.SetLeft(bubble.Container, position.X - _dragStart.X);
         Canvas.SetTop(bubble.Container, position.Y - _dragStart.Y);
 
+        // 슬라이더 값은 인스펙터 표시용으로만 갱신한다. 콜백(ApplyBubbleValues→전체 재생성)이
+        // 매 이동마다 중복 실행되지 않도록 _isLoadingInspector로 억제한다.
         var relative = GetBubblePositionInOwnerPanel(bubble);
+        _isLoadingInspector = true;
         BubbleXSlider.Value = Math.Clamp(relative.X, BubbleXSlider.Minimum, BubbleXSlider.Maximum);
         BubbleYSlider.Value = Math.Clamp(relative.Y, BubbleYSlider.Minimum, BubbleYSlider.Maximum);
-        UpdateMergedBubbleOutlines();
+        _isLoadingInspector = false;
+
+        UpdateMergedBubbleOutlines(bubble.OwnerPanel);
         if (bubble == _selectedBubble)
         {
             PositionSelectedTailHandles();
@@ -4203,15 +4234,22 @@ public partial class MainWindow : Window
         };
 
         UpdateBubbleTailHandles(bubble);
-        UpdateMergedBubbleOutlines();
+        // 이 말풍선이 속한 칸만 갱신해도 충분하다(다른 칸의 도형은 영향받지 않음).
+        UpdateMergedBubbleOutlines(bubble.OwnerPanel);
     }
 
     // 채움은 말풍선별 ShapePath가(배경색을 따로 줄 수 있게), 외곽선은 칸 단위로 합쳐(Union) 그린다.
     // 이렇게 하면 겹친 말풍선들의 경계선이 하나로 이어져 도형이 합쳐진 것처럼 보인다.
-    private void UpdateMergedBubbleOutlines()
+    // only가 지정되면 그 칸만 갱신한다(드래그/슬라이더 등 한 칸만 바뀌는 경우의 비용 절감).
+    private void UpdateMergedBubbleOutlines(ComicPanel? only = null)
     {
         foreach (var panel in _panels)
         {
+            if (only != null && !ReferenceEquals(panel, only))
+            {
+                continue;
+            }
+
             // 채움은 말풍선별 ShapePath가 담당하므로 칸 단위 채움 경로는 비운다.
             panel.BubbleFillPath.Data = null;
             panel.FreeBubbleFillPath.Data = null;
@@ -5234,9 +5272,10 @@ public partial class MainWindow : Window
     {
         // 크롭 ON 이미지는 칸 사변형 밖에서는 화면에 잘려 보이지 않으므로 클릭 대상이 아니다.
         // (확대해 칸 밖으로 넘친 부분이 클릭을 가로채던 문제를 방지한다.)
+        // 사변형 기하는 UpdatePanelShape가 항상 최신으로 유지하는 QuadFill.Data를 재사용한다(매번 새로 만들지 않음).
         if (image.IsCropped)
         {
-            var clip = CreatePanelQuadGeometry(image.OwnerPanel);
+            var clip = image.OwnerPanel.QuadFill.Data ?? CreatePanelQuadGeometry(image.OwnerPanel);
             if (!clip.FillContains(panelPoint))
             {
                 return false;
@@ -5261,7 +5300,8 @@ public partial class MainWindow : Window
         }
 
         // 동영상 등 비트맵이 없는 경우엔 사각형(컨트롤 영역) 기준으로 판정한다.
-        if (image.Image?.Source is not BitmapSource bitmap)
+        var bitmap = GetAlphaBitmap(image);
+        if (bitmap == null)
         {
             return true;
         }
@@ -5290,14 +5330,38 @@ public partial class MainWindow : Window
         return GetPixelAlpha(bitmap, pixelX, pixelY) > 8;
     }
 
-    private static byte GetPixelAlpha(BitmapSource bitmap, int x, int y)
+    // 픽셀 알파를 읽기 위한 BGRA 변환본을 이미지별로 캐시한다(매 히트테스트마다 변환 비용 제거).
+    // 소스가 바뀌면(애니/동영상 프레임 교체) Key 불일치로 자동 재생성된다.
+    private static BitmapSource? GetAlphaBitmap(PanelImage image)
     {
-        var converted = bitmap.Format == PixelFormats.Bgra32 || bitmap.Format == PixelFormats.Pbgra32
-            ? bitmap
-            : new FormatConvertedBitmap(bitmap, PixelFormats.Bgra32, null, 0);
+        if (image.Image?.Source is not BitmapSource src)
+        {
+            return null;
+        }
 
+        if (ReferenceEquals(image.AlphaCacheKey, src) && image.AlphaCacheValue != null)
+        {
+            return image.AlphaCacheValue;
+        }
+
+        BitmapSource converted = src.Format == PixelFormats.Bgra32 || src.Format == PixelFormats.Pbgra32
+            ? src
+            : new FormatConvertedBitmap(src, PixelFormats.Bgra32, null, 0);
+        if (converted.CanFreeze && !converted.IsFrozen)
+        {
+            converted.Freeze();
+        }
+
+        image.AlphaCacheKey = src;
+        image.AlphaCacheValue = converted;
+        return converted;
+    }
+
+    private static byte GetPixelAlpha(BitmapSource bgra, int x, int y)
+    {
+        // bgra는 GetAlphaBitmap이 BGRA로 보장한 비트맵이다.
         var pixels = new byte[4];
-        converted.CopyPixels(new Int32Rect(x, y, 1, 1), pixels, 4, 0);
+        bgra.CopyPixels(new Int32Rect(x, y, 1, 1), pixels, 4, 0);
         return pixels[3];
     }
 
@@ -5670,6 +5734,11 @@ public sealed class PanelImage
     public TranslateTransform Translate { get; }
     public bool IsCropped { get; set; } = true;
     public bool IsLocked { get; set; }
+
+    // 픽셀 알파 히트테스트용 BGRA 변환본 캐시. Key가 현재 소스와 같으면 Value를 재사용한다
+    // (애니메이션/동영상 프레임 교체 시 소스 참조가 바뀌면 자동으로 다시 만든다).
+    public BitmapSource? AlphaCacheKey { get; set; }
+    public BitmapSource? AlphaCacheValue { get; set; }
 
     // 움직이는 이미지용 프레임/지연(ms)과 재생 타이머.
     public BitmapSource[]? Frames { get; set; }
