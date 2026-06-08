@@ -1,0 +1,690 @@
+using Microsoft.Win32;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Windows;
+using System.Windows.Interop;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using System.Windows.Threading;
+using System.Text.Json;
+using SkiaSharp;
+
+namespace KomaForge;
+
+public partial class MainWindow : Window
+{
+    private void UpdatePanelImageSizes(ComicPanel panel)
+    {
+        // 칸 모양은 quadBorder가 그리므로 내용 영역은 프레임 전체 크기를 쓴다.
+        var width = Math.Max(0, panel.Frame.Width);
+        var height = Math.Max(0, panel.Frame.Height);
+
+        foreach (var image in panel.Images)
+        {
+            image.Layer.Width = width;
+            image.Layer.Height = height;
+            image.Content.Width = width;
+            image.Content.Height = height;
+            image.SelectionBorder.Width = width;
+            image.SelectionBorder.Height = height;
+        }
+
+        // 크기가 바뀌면 사변형 모양/클립도 갱신한다.
+        UpdatePanelShape(panel);
+    }
+
+    private void UpdateBubbleGeometry(SpeechBubble bubble)
+    {
+        var width = Math.Max(1, bubble.Container.Width);
+        var height = Math.Max(1, bubble.Container.Height);
+
+        bubble.BodyPath.Data = bubble.Shape switch
+        {
+            BubbleShape.CloudExplosion => CreateCloudExplosionGeometry(width, height, bubble.ShapeCount, bubble.ShapeStrength),
+            BubbleShape.Shout => CreateShoutGeometry(width, height, bubble.ShapeCount, bubble.ShapeStrength),
+            BubbleShape.Flash => CreateFlashGeometry(width, height, bubble.ShapeCount, bubble.ShapeStrength),
+            BubbleShape.ConcentrationLines => CreateConcentrationLinesGeometry(width, height, bubble.ShapeCount, bubble.ShapeStrength),
+            BubbleShape.EffectLines => CreateEffectLinesGeometry(width, height, bubble.ShapeCount, bubble.ShapeStrength),
+            // 테두리 없음: 본체 도형 없이 글자만 보인다(채움·외곽선 모두 없음).
+            BubbleShape.None => null,
+            _ => CreateRoundRectGeometry(width, height, bubble.ShapeStrength)
+        };
+
+        UpdateBubbleTailHandles(bubble);
+        // 이 말풍선이 속한 칸만 갱신해도 충분하다(다른 칸의 도형은 영향받지 않음).
+        UpdateMergedBubbleOutlines(bubble.OwnerPanel);
+    }
+
+    // 채움은 말풍선별 ShapePath가(배경색을 따로 줄 수 있게), 외곽선은 칸 단위로 합쳐(Union) 그린다.
+    // 이렇게 하면 겹친 말풍선들의 경계선이 하나로 이어져 도형이 합쳐진 것처럼 보인다.
+    // only가 지정되면 그 칸만 갱신한다(드래그/슬라이더 등 한 칸만 바뀌는 경우의 비용 절감).
+    private void UpdateMergedBubbleOutlines(ComicPanel? only = null)
+    {
+        foreach (var panel in _panels)
+        {
+            if (only != null && !ReferenceEquals(panel, only))
+            {
+                continue;
+            }
+
+            // 채움은 말풍선별 ShapePath가 담당하므로 칸 단위 채움 경로는 비운다.
+            panel.BubbleFillPath.Data = null;
+            panel.FreeBubbleFillPath.Data = null;
+
+            foreach (var bubble in panel.Bubbles)
+            {
+                UpdateBubbleShapePath(bubble);
+            }
+
+            // 외곽선은 크롭 ON/OFF 그룹별로 합쳐 그린다(크롭 ON은 칸 오버레이라 사변형으로 클리핑됨).
+            panel.BubbleOutlinePath.Data = BuildMergedBubbleOutline(panel, cropped: true);
+            panel.FreeBubbleOutlinePath.Data = BuildMergedBubbleOutline(panel, cropped: false);
+        }
+    }
+
+    // 한 칸의 같은 크롭 그룹 말풍선들의 본체+꼬리 도형을 모두 Union으로 합친 외곽선 도형을 만든다.
+    private static Geometry? BuildMergedBubbleOutline(ComicPanel panel, bool cropped)
+    {
+        Geometry? merged = null;
+        foreach (var bubble in panel.Bubbles)
+        {
+            if (bubble.IsCropped != cropped)
+            {
+                continue;
+            }
+
+            var geometry = BuildBubbleOverlayGeometry(bubble);
+            if (geometry == null)
+            {
+                continue;
+            }
+
+            merged = merged == null
+                ? geometry
+                : Geometry.Combine(merged, geometry, GeometryCombineMode.Union, null);
+        }
+
+        return merged;
+    }
+
+    // 한 말풍선의 본체+꼬리 도형을 오버레이 좌표로 만들어 ShapePath에 적용하고 배경색을 입힌다.
+    private static void UpdateBubbleShapePath(SpeechBubble bubble)
+    {
+        // 선 효과는 대사를 숨기고, 일반 말풍선은 보인다.
+        bubble.TextBlock.Visibility = IsLineEffectShape(bubble.Shape) ? Visibility.Collapsed : Visibility.Visible;
+        // 선 효과가 아닐 때는 선 호스트를 비운다.
+        if (!IsLineEffectShape(bubble.Shape))
+        {
+            bubble.LineHost.Children.Clear();
+            bubble.LineHostSignature = null;
+        }
+
+        if (bubble.BodyPath.Data == null)
+        {
+            // 테두리 없음: 도형 자체가 없다.
+            bubble.ShapePath.Data = null;
+            bubble.ShapePath.Clip = null;
+            return;
+        }
+
+        // 선 효과(집중선/속도선): 선마다 개별 Path로(컨테이너 안 선 호스트) 그려 각 선이 자기 시작점부터 페이드되게 한다.
+        // 선 호스트는 컨테이너 로컬 좌표라 위치 변경 시 자동으로 따라온다 → 크기/모양/돌기/강도/색이 바뀔 때만 재생성한다.
+        if (IsLineEffectShape(bubble.Shape))
+        {
+            bubble.ShapePath.Data = null;
+            bubble.ShapePath.Clip = null;
+
+            var signature = $"{bubble.Shape}|{bubble.Container.Width:F1}|{bubble.Container.Height:F1}|{bubble.ShapeCount}|{bubble.ShapeStrength:F1}|{ToHex(bubble.TextBlock.Fill)}";
+            if (signature == bubble.LineHostSignature)
+            {
+                return; // 위치만 바뀐 경우: 로컬 좌표라 그대로 따라오므로 재생성 불필요.
+            }
+
+            bubble.LineHostSignature = signature;
+            if (bubble.Shape == BubbleShape.ConcentrationLines)
+            {
+                BuildConcentrationLineHost(bubble);
+            }
+            else
+            {
+                BuildEffectLineHost(bubble);
+            }
+
+            return;
+        }
+
+        // 일반 말풍선: 본체+꼬리를 합친 도형에 배경색 채움만 칠한다.
+        // 외곽선(테두리)은 칸 단위 병합 경로(BubbleOutlinePath)가 그려, 겹친 말풍선의 경계선이 하나로 이어진다.
+        bubble.ShapePath.Data = BuildBubbleOverlayGeometry(bubble);
+        bubble.ShapePath.Fill = bubble.BackgroundBrush;
+        bubble.ShapePath.Stroke = Brushes.Transparent;
+        bubble.ShapePath.StrokeThickness = 0;
+        bubble.ShapePath.Clip = null;
+    }
+
+    // 말풍선 본체+꼬리(안으로 깎기 포함)를 오버레이 좌표의 한 도형으로 만든다.
+    // 선 효과/테두리 없음은 본체 도형이 없으므로 null.
+    private static Geometry? BuildBubbleOverlayGeometry(SpeechBubble bubble)
+    {
+        if (bubble.BodyPath.Data == null || IsLineEffectShape(bubble.Shape))
+        {
+            return null;
+        }
+
+        var offset = new TranslateTransform(GetCanvasLeft(bubble.Container), GetCanvasTop(bubble.Container));
+        Geometry shape = bubble.BodyPath.Data.Clone();
+        shape.Transform = offset;
+        foreach (var tail in bubble.Tails)
+        {
+            var tailGeometry = CreateTailGeometry(tail);
+            tailGeometry.Transform = offset;
+            var tailMode = tail.TailInward ? GeometryCombineMode.Exclude : GeometryCombineMode.Union;
+            shape = Geometry.Combine(shape, tailGeometry, tailMode, null);
+        }
+
+        return shape;
+    }
+
+    private static Geometry CreateTailGeometry(BubbleTail tail)
+    {
+        var start = new Point(tail.StartX, tail.StartY);
+        var mid = new Point(tail.MidX, tail.MidY);
+        var end = new Point(tail.X, tail.Y);
+        var direction = end - start;
+
+        if (direction.Length < 1)
+        {
+            direction = new Vector(0, 1);
+        }
+
+        direction.Normalize();
+        var normal = new Vector(-direction.Y, direction.X);
+        var halfWidth = Math.Max(2, tail.Width / 2);
+        var startA = start + normal * halfWidth;
+        var startB = start - normal * halfWidth;
+
+        // 중간 점을 곡선의 제어점으로 사용한다. 베이스의 양쪽 변은
+        // 중간 점을 기준으로 ±halfWidth만큼 벌어진 제어점을 지나 끝점(꼭짓점)으로 모인다.
+        var controlA = mid + normal * halfWidth;
+        var controlB = mid - normal * halfWidth;
+
+        var figure = new PathFigure { StartPoint = startA, IsClosed = true };
+        figure.Segments.Add(new QuadraticBezierSegment(controlA, end, true));
+        figure.Segments.Add(new QuadraticBezierSegment(controlB, startB, true));
+        return new PathGeometry(new[] { figure });
+    }
+
+    private static Thumb CreateTailHandle(Color? color = null)
+    {
+        return new Thumb
+        {
+            Width = 14,
+            Height = 14,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Top,
+            Cursor = Cursors.SizeAll,
+            Background = new SolidColorBrush(color ?? Color.FromRgb(43, 111, 106)),
+            BorderBrush = Brushes.White,
+            BorderThickness = new Thickness(2),
+            Visibility = Visibility.Hidden
+        };
+    }
+
+    private void DragSelectedTailPoint(TailPointKind point, DragDeltaEventArgs e)
+    {
+        if (_selectedBubble == null || _selectedBubbleTail == null)
+        {
+            return;
+        }
+
+        switch (point)
+        {
+            case TailPointKind.Start:
+                // 넓은 쪽(밑변)을 끌면 꼬리 전체를 같은 변위로 통째로 옮긴다.
+                _selectedBubbleTail.StartX += e.HorizontalChange;
+                _selectedBubbleTail.StartY += e.VerticalChange;
+                _selectedBubbleTail.MidX += e.HorizontalChange;
+                _selectedBubbleTail.MidY += e.VerticalChange;
+                _selectedBubbleTail.X += e.HorizontalChange;
+                _selectedBubbleTail.Y += e.VerticalChange;
+                break;
+            case TailPointKind.Mid:
+                _selectedBubbleTail.MidX += e.HorizontalChange;
+                _selectedBubbleTail.MidY += e.VerticalChange;
+                break;
+            default:
+                _selectedBubbleTail.X += e.HorizontalChange;
+                _selectedBubbleTail.Y += e.VerticalChange;
+                break;
+        }
+
+        // 끝점 좌표가 바뀌는 경우(끝점 이동, 또는 시작점 이동으로 전체가 따라온 경우) 끝점 슬라이더를 동기화한다.
+        if (point == TailPointKind.Start || point == TailPointKind.End)
+        {
+            _isLoadingInspector = true;
+            BubbleTailXSlider.Value = Math.Clamp(_selectedBubbleTail.X, BubbleTailXSlider.Minimum, BubbleTailXSlider.Maximum);
+            BubbleTailYSlider.Value = Math.Clamp(_selectedBubbleTail.Y, BubbleTailYSlider.Minimum, BubbleTailYSlider.Maximum);
+            BubbleTailWidthSlider.Value = Math.Clamp(_selectedBubbleTail.Width, BubbleTailWidthSlider.Minimum, BubbleTailWidthSlider.Maximum);
+            _isLoadingInspector = false;
+        }
+
+        UpdateBubbleGeometry(_selectedBubble);
+        UpdateBubbleTailList(_selectedBubble);
+        UpdateInspectorLabels();
+    }
+
+    // 호출부 호환용: 인자 말풍선과 무관하게 선택된 꼬리에 대해 싱글톤 핸들을 갱신한다.
+    private void UpdateBubbleTailHandles(SpeechBubble bubble)
+    {
+        PositionSelectedTailHandles();
+    }
+
+    private void PositionSelectedTailHandles()
+    {
+        PositionBubbleSelectionBox();
+        PositionTextRegionHandles();
+        PositionPanelCornerHandles();
+        EnsureTailHandles();
+
+        var tail = _selectedBubbleTail;
+        var show = _selectedBubble != null && tail != null && _selectedBubble.Tails.Contains(tail);
+        var visibility = show ? Visibility.Visible : Visibility.Hidden;
+        _tailStartHandle!.Visibility = visibility;
+        _tailMidHandle!.Visibility = visibility;
+        _tailEndHandle!.Visibility = visibility;
+
+        if (!show || _selectedBubble == null || tail == null)
+        {
+            return;
+        }
+
+        var origin = GetBubblePageOrigin(_selectedBubble);
+        PlaceTailHandle(_tailStartHandle, origin.X + tail.StartX, origin.Y + tail.StartY);
+        PlaceTailHandle(_tailMidHandle, origin.X + tail.MidX, origin.Y + tail.MidY);
+        PlaceTailHandle(_tailEndHandle, origin.X + tail.X, origin.Y + tail.Y);
+    }
+
+    private static void PlaceTailHandle(Thumb handle, double pageX, double pageY)
+    {
+        Canvas.SetLeft(handle, pageX - handle.Width / 2);
+        Canvas.SetTop(handle, pageY - handle.Height / 2);
+    }
+
+    // 선택 박스/리사이즈 핸들은 PageOverlay(비클리핑)에 두어 칸 경계를 넘는 말풍선도 잘리지 않고 보인다.
+    private void EnsureBubbleSelectionUi()
+    {
+        if (_bubbleSelectionBox == null)
+        {
+            _bubbleSelectionBox = new Border
+            {
+                BorderBrush = new SolidColorBrush(Color.FromRgb(43, 111, 106)),
+                BorderThickness = new Thickness(2),
+                IsHitTestVisible = false,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                VerticalAlignment = VerticalAlignment.Top,
+                Visibility = Visibility.Hidden
+            };
+
+            _bubbleResizeHandle = new Thumb
+            {
+                Width = 18,
+                Height = 18,
+                Cursor = Cursors.SizeNWSE,
+                Background = new SolidColorBrush(Color.FromRgb(43, 111, 106)),
+                BorderBrush = Brushes.White,
+                BorderThickness = new Thickness(2),
+                HorizontalAlignment = HorizontalAlignment.Left,
+                VerticalAlignment = VerticalAlignment.Top,
+                Visibility = Visibility.Hidden
+            };
+            _bubbleResizeHandle.DragStarted += (_, _) =>
+            {
+                if (_selectedBubble != null)
+                {
+                    SelectBubble(_selectedBubble);
+                }
+            };
+            _bubbleResizeHandle.DragDelta += (_, e) =>
+            {
+                if (_selectedBubble != null)
+                {
+                    ResizeBubble(_selectedBubble, e);
+                }
+            };
+        }
+
+        if (!PageOverlay.Children.Contains(_bubbleSelectionBox))
+        {
+            PageOverlay.Children.Add(_bubbleSelectionBox);
+            Panel.SetZIndex(_bubbleSelectionBox, int.MaxValue - 2);
+        }
+
+        if (!PageOverlay.Children.Contains(_bubbleResizeHandle))
+        {
+            PageOverlay.Children.Add(_bubbleResizeHandle!);
+            Panel.SetZIndex(_bubbleResizeHandle!, int.MaxValue - 1);
+        }
+    }
+
+    private void PositionBubbleSelectionBox()
+    {
+        EnsureBubbleSelectionUi();
+
+        var show = _selectionKind == SelectionKind.Bubble && _selectedBubble != null;
+        _bubbleSelectionBox!.Visibility = show ? Visibility.Visible : Visibility.Hidden;
+        _bubbleResizeHandle!.Visibility = show ? Visibility.Visible : Visibility.Hidden;
+
+        if (!show || _selectedBubble == null)
+        {
+            return;
+        }
+
+        var origin = GetBubblePageOrigin(_selectedBubble);
+        var w = _selectedBubble.Container.Width;
+        var h = _selectedBubble.Container.Height;
+
+        // 잠긴 말풍선은 선택 박스/핸들을 빨강 계열로 구분한다.
+        var accent = _selectedBubble.IsLocked ? SelectionLockedBrush : SelectionAccentBrush;
+        _bubbleSelectionBox.BorderBrush = accent;
+        _bubbleResizeHandle.Background = accent;
+
+        Canvas.SetLeft(_bubbleSelectionBox, origin.X);
+        Canvas.SetTop(_bubbleSelectionBox, origin.Y);
+        _bubbleSelectionBox.Width = w;
+        _bubbleSelectionBox.Height = h;
+
+        // 핸들은 박스 우하단 안쪽 모서리에 둔다.
+        Canvas.SetLeft(_bubbleResizeHandle, origin.X + w - _bubbleResizeHandle.Width);
+        Canvas.SetTop(_bubbleResizeHandle, origin.Y + h - _bubbleResizeHandle.Height);
+    }
+
+    private void EnsureTextRegionHandles()
+    {
+        if (_textRegionTopLeft == null)
+        {
+            // 텍스트 영역 모서리 핸들(선택 박스의 틸과 구분되도록 주황색).
+            var color = Color.FromRgb(214, 122, 32);
+            _textRegionTopLeft = CreateCornerHandle(color, Cursors.SizeNWSE);
+            _textRegionTopRight = CreateCornerHandle(color, Cursors.SizeNESW);
+            _textRegionBottomLeft = CreateCornerHandle(color, Cursors.SizeNESW);
+            _textRegionBottomRight = CreateCornerHandle(color, Cursors.SizeNWSE);
+            _textRegionTopLeft.DragDelta += (_, e) => DragTextRegionCorner(TextRegionCorner.TopLeft, e);
+            _textRegionTopRight!.DragDelta += (_, e) => DragTextRegionCorner(TextRegionCorner.TopRight, e);
+            _textRegionBottomLeft!.DragDelta += (_, e) => DragTextRegionCorner(TextRegionCorner.BottomLeft, e);
+            _textRegionBottomRight!.DragDelta += (_, e) => DragTextRegionCorner(TextRegionCorner.BottomRight, e);
+        }
+
+        foreach (var handle in new[] { _textRegionTopLeft!, _textRegionTopRight!, _textRegionBottomLeft!, _textRegionBottomRight! })
+        {
+            if (!PageOverlay.Children.Contains(handle))
+            {
+                PageOverlay.Children.Add(handle);
+                Panel.SetZIndex(handle, int.MaxValue - 1);
+            }
+        }
+    }
+
+    private static Thumb CreateCornerHandle(Color color, Cursor cursor)
+    {
+        return new Thumb
+        {
+            Width = 12,
+            Height = 12,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Top,
+            Cursor = cursor,
+            Background = new SolidColorBrush(color),
+            BorderBrush = Brushes.White,
+            BorderThickness = new Thickness(2),
+            Visibility = Visibility.Hidden
+        };
+    }
+
+    private void PositionTextRegionHandles()
+    {
+        EnsureTextRegionHandles();
+
+        var show = _selectionKind == SelectionKind.Bubble && _selectedBubble != null;
+        var visibility = show ? Visibility.Visible : Visibility.Hidden;
+        _textRegionTopLeft!.Visibility = visibility;
+        _textRegionTopRight!.Visibility = visibility;
+        _textRegionBottomLeft!.Visibility = visibility;
+        _textRegionBottomRight!.Visibility = visibility;
+
+        if (!show || _selectedBubble == null)
+        {
+            return;
+        }
+
+        var origin = GetBubblePageOrigin(_selectedBubble);
+        var w = _selectedBubble.Container.Width;
+        var h = _selectedBubble.Container.Height;
+        var m = _selectedBubble.TextBlock.Margin;
+
+        // 텍스트 영역 사각형(컨테이너 - 여백)의 네 모서리.
+        var leftX = origin.X + m.Left;
+        var rightX = origin.X + w - m.Right;
+        var topY = origin.Y + m.Top;
+        var bottomY = origin.Y + h - m.Bottom;
+
+        PlaceTailHandle(_textRegionTopLeft, leftX, topY);
+        PlaceTailHandle(_textRegionTopRight, rightX, topY);
+        PlaceTailHandle(_textRegionBottomLeft, leftX, bottomY);
+        PlaceTailHandle(_textRegionBottomRight, rightX, bottomY);
+    }
+
+    private void DragTextRegionCorner(TextRegionCorner corner, DragDeltaEventArgs e)
+    {
+        if (_selectedBubble == null)
+        {
+            return;
+        }
+
+        var tb = _selectedBubble.TextBlock;
+        var w = _selectedBubble.Container.Width;
+        var h = _selectedBubble.Container.Height;
+        double left = tb.Margin.Left, top = tb.Margin.Top, right = tb.Margin.Right, bottom = tb.Margin.Bottom;
+
+        switch (corner)
+        {
+            case TextRegionCorner.TopLeft:
+                left += e.HorizontalChange;
+                top += e.VerticalChange;
+                break;
+            case TextRegionCorner.TopRight:
+                right -= e.HorizontalChange;
+                top += e.VerticalChange;
+                break;
+            case TextRegionCorner.BottomLeft:
+                left += e.HorizontalChange;
+                bottom -= e.VerticalChange;
+                break;
+            default:
+                right -= e.HorizontalChange;
+                bottom -= e.VerticalChange;
+                break;
+        }
+
+        // 여백은 0 이상, 텍스트 영역이 최소 10px는 남도록 제한.
+        const double minRegion = 10;
+        left = Math.Clamp(left, 0, Math.Max(0, w - right - minRegion));
+        right = Math.Clamp(right, 0, Math.Max(0, w - left - minRegion));
+        top = Math.Clamp(top, 0, Math.Max(0, h - bottom - minRegion));
+        bottom = Math.Clamp(bottom, 0, Math.Max(0, h - top - minRegion));
+
+        tb.Margin = new Thickness(left, top, right, bottom);
+        PositionTextRegionHandles();
+    }
+
+    private void EnsurePanelCornerHandles()
+    {
+        if (_panelCornerHandles == null)
+        {
+            var color = Color.FromRgb(43, 111, 106);
+            _panelCornerHandles = new[]
+            {
+                CreateCornerHandle(color, Cursors.SizeNWSE), // TL
+                CreateCornerHandle(color, Cursors.SizeNESW), // TR
+                CreateCornerHandle(color, Cursors.SizeNWSE), // BR
+                CreateCornerHandle(color, Cursors.SizeNESW)  // BL
+            };
+            for (var i = 0; i < 4; i++)
+            {
+                var index = i;
+                _panelCornerHandles[i].DragDelta += (_, e) => DragPanelCorner(index, e);
+            }
+        }
+
+        foreach (var handle in _panelCornerHandles)
+        {
+            if (!PageOverlay.Children.Contains(handle))
+            {
+                PageOverlay.Children.Add(handle);
+                Panel.SetZIndex(handle, int.MaxValue - 1);
+            }
+        }
+    }
+
+    private void PositionPanelCornerHandles()
+    {
+        EnsurePanelCornerHandles();
+
+        var show = _selectionKind == SelectionKind.Panel && _selectedPanel != null && _selectedPanel.CornerMode;
+        var visibility = show ? Visibility.Visible : Visibility.Hidden;
+        foreach (var handle in _panelCornerHandles!)
+        {
+            handle.Visibility = visibility;
+        }
+
+        if (!show || _selectedPanel == null)
+        {
+            return;
+        }
+
+        var w = _selectedPanel.Frame.Width;
+        var h = _selectedPanel.Frame.Height;
+        var ox = GetCanvasLeft(_selectedPanel.Frame);
+        var oy = GetCanvasTop(_selectedPanel.Frame);
+        var o = _selectedPanel.CornerOffsets;
+
+        // TL,TR,BR,BL (CornerOffsets 순서와 동일)
+        PlaceTailHandle(_panelCornerHandles[0], ox + 0 + o[0].X, oy + 0 + o[0].Y);
+        PlaceTailHandle(_panelCornerHandles[1], ox + w + o[1].X, oy + 0 + o[1].Y);
+        PlaceTailHandle(_panelCornerHandles[2], ox + w + o[2].X, oy + h + o[2].Y);
+        PlaceTailHandle(_panelCornerHandles[3], ox + 0 + o[3].X, oy + h + o[3].Y);
+    }
+
+    private void DragPanelCorner(int index, DragDeltaEventArgs e)
+    {
+        if (_selectedPanel == null || index < 0 || index > 3)
+        {
+            return;
+        }
+
+        var o = _selectedPanel.CornerOffsets;
+        o[index] = new Point(o[index].X + e.HorizontalChange, o[index].Y + e.VerticalChange);
+
+        UpdatePanelShape(_selectedPanel);
+        PositionPanelCornerHandles();
+    }
+
+    // 말풍선 컨테이너의 (0,0)을 페이지(PageOverlay) 좌표로 변환한다.
+    // 크롭된 말풍선은 칸 오버레이에 들어 있으므로 칸 오버레이 원점을 더해 준다.
+    private Point GetBubblePageOrigin(SpeechBubble bubble)
+    {
+        // 말풍선은 (크롭 여부와 무관하게) 칸 안의 오버레이에 있으므로, 그 오버레이 원점을 페이지 좌표로 변환한다.
+        var overlay = bubble.IsCropped ? bubble.OwnerPanel.Overlay : bubble.OwnerPanel.FreeOverlay;
+        var panelOrigin = overlay.TransformToVisual(PageOverlay).Transform(new Point(0, 0));
+        return new Point(panelOrigin.X + GetCanvasLeft(bubble.Container), panelOrigin.Y + GetCanvasTop(bubble.Container));
+    }
+
+    private static System.Windows.Shapes.Path CreateBubbleOutlinePath()
+    {
+        return new System.Windows.Shapes.Path
+        {
+            Fill = Brushes.Transparent,
+            Stroke = Brushes.Black,
+            StrokeThickness = 2,
+            IsHitTestVisible = false
+        };
+    }
+
+    private static System.Windows.Shapes.Path CreateBubbleFillPath()
+    {
+        return new System.Windows.Shapes.Path
+        {
+            Fill = Brushes.White,
+            Stroke = Brushes.Transparent,
+            StrokeThickness = 0,
+            IsHitTestVisible = false
+        };
+    }
+
+    private void EnsureTailHandles()
+    {
+        if (_tailStartHandle == null)
+        {
+            _tailStartHandle = CreateTailHandle();
+            _tailMidHandle = CreateTailHandle(Color.FromRgb(214, 122, 32));
+            _tailEndHandle = CreateTailHandle();
+            _tailStartHandle.DragDelta += (_, e) => DragSelectedTailPoint(TailPointKind.Start, e);
+            _tailMidHandle!.DragDelta += (_, e) => DragSelectedTailPoint(TailPointKind.Mid, e);
+            _tailEndHandle!.DragDelta += (_, e) => DragSelectedTailPoint(TailPointKind.End, e);
+        }
+
+        // 핸들은 페이지 좌표로 배치하므로 페이지 레이어에 올려, 칸 경계 클리핑을 받지 않게 한다.
+        foreach (var handle in new[] { _tailStartHandle!, _tailMidHandle!, _tailEndHandle! })
+        {
+            if (!PageOverlay.Children.Contains(handle))
+            {
+                handle.HorizontalAlignment = HorizontalAlignment.Left;
+                handle.VerticalAlignment = VerticalAlignment.Top;
+                PageOverlay.Children.Add(handle);
+                Panel.SetZIndex(handle, int.MaxValue);
+            }
+        }
+    }
+
+    private BubbleShape GetSelectedBubbleShape()
+    {
+        if (BubbleShapeComboBox?.SelectedItem is not ComboBoxItem item)
+        {
+            return BubbleShape.RoundRect;
+        }
+
+        return item.Tag?.ToString() switch
+        {
+            "CloudExplosion" => BubbleShape.CloudExplosion,
+            "Shout" => BubbleShape.Shout,
+            "Flash" => BubbleShape.Flash,
+            "ConcentrationLines" => BubbleShape.ConcentrationLines,
+            "EffectLines" => BubbleShape.EffectLines,
+            "None" => BubbleShape.None,
+            _ => BubbleShape.RoundRect
+        };
+    }
+
+    // 저장된 모양 문자열을 현재 모양으로 변환한다. 구버전 값은 적절한 강도로 매핑한다.
+    private static (BubbleShape Shape, double? LegacyStrength) MapShape(string? raw)
+    {
+        return raw switch
+        {
+            "CloudExplosion" => (BubbleShape.CloudExplosion, null),
+            "Shout" => (BubbleShape.Shout, null),
+            "Flash" => (BubbleShape.Flash, null),
+            "ConcentrationLines" => (BubbleShape.ConcentrationLines, null),
+            "EffectLines" => (BubbleShape.EffectLines, null),
+            "None" => (BubbleShape.None, null),
+            "Oval" => (BubbleShape.RoundRect, 0.0),
+            "Rectangle" => (BubbleShape.RoundRect, 100.0),
+            "Cloud" => (BubbleShape.CloudExplosion, 0.0),
+            "Explosion" => (BubbleShape.CloudExplosion, 100.0),
+            _ => (BubbleShape.RoundRect, null)
+        };
+    }
+
+    // 원형/사각: 강도 0이면 모서리 반지름이 절반(=타원), 100이면 0(=사각), 중간은 둥근 사각형.
+}
