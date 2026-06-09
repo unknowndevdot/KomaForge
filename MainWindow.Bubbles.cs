@@ -18,21 +18,9 @@ public partial class MainWindow : Window
 {
     private void UpdatePanelImageSizes(ComicPanel panel)
     {
-        // 칸 모양은 quadBorder가 그리므로 내용 영역은 프레임 전체 크기를 쓴다.
-        var width = Math.Max(0, panel.Frame.Width);
-        var height = Math.Max(0, panel.Frame.Height);
-
-        foreach (var image in panel.Images)
-        {
-            image.Layer.Width = width;
-            image.Layer.Height = height;
-            image.Content.Width = width;
-            image.Content.Height = height;
-            image.SelectionBorder.Width = width;
-            image.SelectionBorder.Height = height;
-        }
-
-        // 크기가 바뀌면 사변형 모양/클립도 갱신한다.
+        // 이미지는 추가 시점의 크기·위치를 그대로 유지한다(말풍선처럼 칸 리사이즈에 영향받지 않게).
+        // 따라서 칸 크기가 바뀌어도 이미지 Content/Layer는 다시 맞추지 않고, 칸 모양/클립만 갱신한다.
+        // (잘려 보이는 범위만 새 칸 사변형을 따른다.)
         UpdatePanelShape(panel);
     }
 

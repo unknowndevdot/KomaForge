@@ -244,6 +244,18 @@ public partial class MainWindow : Window
         SaveProjectAs();
     }
 
+    // 메뉴 [파일 > 저장]: Ctrl+S와 동일하게 현재 파일에 덮어쓰기 저장.
+    private void SaveMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        SaveProjectToCurrentOrPrompt();
+    }
+
+    // 메뉴 [파일 > 종료].
+    private void ExitMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        Close();
+    }
+
     // Ctrl+S: 현재 불러왔거나 저장한 파일에 덮어쓰기 저장. 경로가 없으면 다른 이름으로 저장 대화상자.
     private void SaveProjectToCurrentOrPrompt()
     {

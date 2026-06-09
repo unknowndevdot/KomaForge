@@ -180,6 +180,27 @@ public partial class MainWindow : Window
                 e.Handled = true;
                 return;
             }
+
+            // Ctrl+X/C/V: 칸·이미지·말풍선 잘라내기/복사/붙여넣기.
+            // 텍스트 입력 중에는 기본 텍스트 편집(잘라내기/복사/붙여넣기)에 양보한다.
+            if ((e.Key == Key.X || e.Key == Key.C || e.Key == Key.V) && Keyboard.FocusedElement is not TextBox)
+            {
+                if (e.Key == Key.X)
+                {
+                    CutSelection();
+                }
+                else if (e.Key == Key.C)
+                {
+                    CopySelection();
+                }
+                else
+                {
+                    PasteClipboard();
+                }
+
+                e.Handled = true;
+                return;
+            }
         }
 
         // L: 선택 오브젝트 잠금 토글.
@@ -660,14 +681,14 @@ public partial class MainWindow : Window
 
     private void UpdateUndoRedoButtons()
     {
-        if (UndoButton != null)
+        if (UndoMenuItem != null)
         {
-            UndoButton.IsEnabled = _undoStack.Count > 0;
+            UndoMenuItem.IsEnabled = _undoStack.Count > 0;
         }
 
-        if (RedoButton != null)
+        if (RedoMenuItem != null)
         {
-            RedoButton.IsEnabled = _redoStack.Count > 0;
+            RedoMenuItem.IsEnabled = _redoStack.Count > 0;
         }
     }
 
@@ -684,7 +705,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (PageFitCheckBox?.IsChecked != true)
+        if (PageFitMenuItem?.IsChecked != true)
         {
             PageFrame.LayoutTransform = Transform.Identity;
             return;

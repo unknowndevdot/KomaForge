@@ -41,6 +41,8 @@ public sealed class PanelImageData
     public double TranslateY { get; set; }
     public bool IsCropped { get; set; } = true;
     public bool IsLocked { get; set; }
+    public double PivotX { get; set; }
+    public double PivotY { get; set; } = 1;
 }
 
 public sealed class SpeechBubbleData
@@ -65,6 +67,8 @@ public sealed class SpeechBubbleData
     public int ShapeCount { get; set; } = 9;
     public double ShapeStrength { get; set; }
     public bool TailInward { get; set; }
+    public double PivotX { get; set; }
+    public double PivotY { get; set; } = 1;
     public List<BubbleTailData> Tails { get; set; } = new();
 }
 

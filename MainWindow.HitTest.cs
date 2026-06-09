@@ -378,7 +378,7 @@ public partial class MainWindow : Window
             AutoMarginTextBox.Text = settings.AutoMargin ?? "24";
             AutoGutterTextBox.Text = settings.AutoGutter ?? "14";
             SetBubbleShapeByTag(settings.BubbleShape ?? "Oval");
-            PageFitCheckBox.IsChecked = settings.PageFit;
+            PageFitMenuItem.IsChecked = settings.PageFit;
             SetInspectorVisible(settings.InspectorVisible);
         }
         catch
@@ -410,7 +410,7 @@ public partial class MainWindow : Window
                 Height = RestoreBounds.Height,
                 Left = RestoreBounds.Left,
                 Top = RestoreBounds.Top,
-                PageFit = PageFitCheckBox.IsChecked == true,
+                PageFit = PageFitMenuItem.IsChecked,
                 LayoutPattern = LayoutPatternTextBox.Text,
                 AutoMargin = AutoMarginTextBox.Text,
                 AutoGutter = AutoGutterTextBox.Text,

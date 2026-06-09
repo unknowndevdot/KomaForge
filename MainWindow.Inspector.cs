@@ -32,24 +32,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        RemovePanel(_selectedPanel);
-        UpdatePanelOrder();
-
-        _selectedPanel = _panels.LastOrDefault();
-        _selectedBubble = null;
-
-        if (_selectedPanel != null)
-        {
-            SelectPanel(_selectedPanel);
-        }
-        else
-        {
-            UpdatePanelList();
-        }
-
-        UpdateSelectionLabels();
-        UpdateSelectionVisuals();
-        UpdateLayoutSummary();
+        DeleteSelectedPanel();
         UpdateStatus("칸을 삭제했습니다.");
     }
 
@@ -531,6 +514,28 @@ public partial class MainWindow : Window
         var cropped = ImageCropCheckBox.IsChecked == true;
         SetImageCrop(_selectedImage, cropped);
         UpdateStatus(cropped ? "이미지를 칸 안에서 자릅니다." : "이미지가 칸 밖으로도 보입니다.");
+    }
+
+    private void ImagePivotBox_Changed(object sender, TextChangedEventArgs e)
+    {
+        if (_isLoadingInspector || _selectedImage == null)
+        {
+            return;
+        }
+
+        _selectedImage.PivotX = Math.Clamp(ParseDoubleOr(ImagePivotXBox.Text, 0), 0, 1);
+        _selectedImage.PivotY = Math.Clamp(ParseDoubleOr(ImagePivotYBox.Text, 1), 0, 1);
+    }
+
+    private void BubblePivotBox_Changed(object sender, TextChangedEventArgs e)
+    {
+        if (_isLoadingInspector || _selectedBubble == null)
+        {
+            return;
+        }
+
+        _selectedBubble.PivotX = Math.Clamp(ParseDoubleOr(BubblePivotXBox.Text, 0), 0, 1);
+        _selectedBubble.PivotY = Math.Clamp(ParseDoubleOr(BubblePivotYBox.Text, 1), 0, 1);
     }
 
     private void BubbleShapeComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)

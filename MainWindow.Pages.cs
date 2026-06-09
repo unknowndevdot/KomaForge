@@ -97,75 +97,93 @@ public partial class MainWindow : Window
 
         foreach (var panel in _panels)
         {
-            var panelData = new ComicPanelData
-            {
-                Number = panel.Number,
-                X = GetCanvasLeft(panel.Frame),
-                Y = GetCanvasTop(panel.Frame),
-                Width = panel.Frame.Width,
-                Height = panel.Frame.Height,
-                IsLocked = panel.IsLocked,
-                CornerMode = panel.CornerMode,
-                CornerOffsets = PanelOffsetsToArray(panel.CornerOffsets)
-            };
-
-            foreach (var image in panel.Images)
-            {
-                panelData.Images.Add(new PanelImageData
-                {
-                    Path = image.Path,
-                    Scale = image.Scale.ScaleX,
-                    TranslateX = image.Translate.X,
-                    TranslateY = image.Translate.Y,
-                    IsCropped = image.IsCropped,
-                    IsLocked = image.IsLocked
-                });
-            }
-
-            foreach (var bubble in panel.Bubbles)
-            {
-                var position = GetBubblePositionInOwnerPanel(bubble);
-                panelData.Bubbles.Add(new SpeechBubbleData
-                {
-                    Text = bubble.TextBlock.Text,
-                    X = position.X,
-                    Y = position.Y,
-                    Width = bubble.Container.Width,
-                    Height = bubble.Container.Height,
-                    FontSize = bubble.TextBlock.FontSize,
-                    TextMarginLeft = bubble.TextBlock.Margin.Left,
-                    TextMarginTop = bubble.TextBlock.Margin.Top,
-                    TextMarginRight = bubble.TextBlock.Margin.Right,
-                    TextMarginBottom = bubble.TextBlock.Margin.Bottom,
-                    IsCropped = bubble.IsCropped,
-                    IsLocked = bubble.IsLocked,
-                    HasTextOutline = bubble.TextBlock.OutlineEnabled,
-                    FillColor = ToHex(bubble.TextBlock.Fill),
-                    StrokeColor = ToHex(bubble.TextBlock.Stroke),
-                    BackgroundColor = ToHex(bubble.BackgroundBrush),
-                    Shape = bubble.Shape.ToString(),
-                    ShapeCount = bubble.ShapeCount,
-                    ShapeStrength = bubble.ShapeStrength,
-                    Tails = bubble.Tails
-                        .Select(tail => new BubbleTailData
-                        {
-                            StartX = tail.StartX,
-                            StartY = tail.StartY,
-                            MidX = tail.MidX,
-                            MidY = tail.MidY,
-                            X = tail.X,
-                            Y = tail.Y,
-                            Width = tail.Width,
-                            TailInward = tail.TailInward
-                        })
-                        .ToList()
-                });
-            }
-
-            page.Panels.Add(panelData);
+            page.Panels.Add(CapturePanelData(panel));
         }
 
         return page;
+    }
+
+    // --- 단일 오브젝트를 직렬화 DTO로 캡처(저장·클립보드 공용) ---
+
+    private static PanelImageData CaptureImageData(PanelImage image) => new()
+    {
+        Path = image.Path,
+        Scale = image.Scale.ScaleX,
+        TranslateX = image.Translate.X,
+        TranslateY = image.Translate.Y,
+        IsCropped = image.IsCropped,
+        IsLocked = image.IsLocked,
+        PivotX = image.PivotX,
+        PivotY = image.PivotY
+    };
+
+    private SpeechBubbleData CaptureBubbleData(SpeechBubble bubble)
+    {
+        var position = GetBubblePositionInOwnerPanel(bubble);
+        return new SpeechBubbleData
+        {
+            Text = bubble.TextBlock.Text,
+            X = position.X,
+            Y = position.Y,
+            Width = bubble.Container.Width,
+            Height = bubble.Container.Height,
+            FontSize = bubble.TextBlock.FontSize,
+            TextMarginLeft = bubble.TextBlock.Margin.Left,
+            TextMarginTop = bubble.TextBlock.Margin.Top,
+            TextMarginRight = bubble.TextBlock.Margin.Right,
+            TextMarginBottom = bubble.TextBlock.Margin.Bottom,
+            IsCropped = bubble.IsCropped,
+            IsLocked = bubble.IsLocked,
+            HasTextOutline = bubble.TextBlock.OutlineEnabled,
+            FillColor = ToHex(bubble.TextBlock.Fill),
+            StrokeColor = ToHex(bubble.TextBlock.Stroke),
+            BackgroundColor = ToHex(bubble.BackgroundBrush),
+            Shape = bubble.Shape.ToString(),
+            ShapeCount = bubble.ShapeCount,
+            ShapeStrength = bubble.ShapeStrength,
+            PivotX = bubble.PivotX,
+            PivotY = bubble.PivotY,
+            Tails = bubble.Tails
+                .Select(tail => new BubbleTailData
+                {
+                    StartX = tail.StartX,
+                    StartY = tail.StartY,
+                    MidX = tail.MidX,
+                    MidY = tail.MidY,
+                    X = tail.X,
+                    Y = tail.Y,
+                    Width = tail.Width,
+                    TailInward = tail.TailInward
+                })
+                .ToList()
+        };
+    }
+
+    private ComicPanelData CapturePanelData(ComicPanel panel)
+    {
+        var panelData = new ComicPanelData
+        {
+            Number = panel.Number,
+            X = GetCanvasLeft(panel.Frame),
+            Y = GetCanvasTop(panel.Frame),
+            Width = panel.Frame.Width,
+            Height = panel.Frame.Height,
+            IsLocked = panel.IsLocked,
+            CornerMode = panel.CornerMode,
+            CornerOffsets = PanelOffsetsToArray(panel.CornerOffsets)
+        };
+
+        foreach (var image in panel.Images)
+        {
+            panelData.Images.Add(CaptureImageData(image));
+        }
+
+        foreach (var bubble in panel.Bubbles)
+        {
+            panelData.Bubbles.Add(CaptureBubbleData(bubble));
+        }
+
+        return panelData;
     }
 
     private List<ComicPageData> CaptureProjectPages(string? projectDirectory)
@@ -201,7 +219,9 @@ public partial class MainWindow : Window
                         TranslateX = image.TranslateX,
                         TranslateY = image.TranslateY,
                         IsCropped = image.IsCropped,
-                        IsLocked = image.IsLocked
+                        IsLocked = image.IsLocked,
+                        PivotX = image.PivotX,
+                        PivotY = image.PivotY
                     });
                 }
 
@@ -230,85 +250,8 @@ public partial class MainWindow : Window
 
         foreach (var panelData in page.Panels)
         {
-            var panel = CreatePanel(panelData.Number, panelData.X, panelData.Y, panelData.Width, panelData.Height);
-            AddPanel(panel);
+            CreatePanelFromData(panelData);
             _nextPanelNumber = Math.Max(_nextPanelNumber, panelData.Number + 1);
-
-            foreach (var imageData in panelData.Images)
-            {
-                var imagePath = ResolveProjectPath(imageData.Path);
-
-                if (!File.Exists(imagePath))
-                {
-                    continue;
-                }
-
-                var image = AddPanelImage(panel, imagePath);
-                image.Scale.ScaleX = imageData.Scale <= 0 ? 1 : imageData.Scale;
-                image.Scale.ScaleY = imageData.Scale <= 0 ? 1 : imageData.Scale;
-                image.Translate.X = imageData.TranslateX;
-                image.Translate.Y = imageData.TranslateY;
-                SetImageCrop(image, imageData.IsCropped);
-                SetImageLocked(image, imageData.IsLocked);
-            }
-
-            foreach (var bubbleData in panelData.Bubbles)
-            {
-                var bubble = CreateSpeechBubble(
-                    panel,
-                    bubbleData.Text,
-                    bubbleData.Width,
-                    bubbleData.Height,
-                    bubbleData.FontSize,
-                    bubbleData.X,
-                    bubbleData.Y);
-
-                bubble.TextBlock.Margin = new Thickness(bubbleData.TextMarginLeft, bubbleData.TextMarginTop, bubbleData.TextMarginRight, bubbleData.TextMarginBottom);
-
-                var (mappedShape, legacyStrength) = MapShape(bubbleData.Shape);
-                bubble.Shape = mappedShape;
-                bubble.ShapeStrength = legacyStrength ?? bubbleData.ShapeStrength;
-                bubble.ShapeCount = bubbleData.ShapeCount <= 0 ? 9 : bubbleData.ShapeCount;
-                bubble.Tails.Clear();
-                bubble.Tails.AddRange(bubbleData.Tails.Select(tail => new BubbleTail
-                {
-                    StartX = tail.StartX,
-                    StartY = tail.StartY,
-                    MidX = double.IsNaN(tail.MidX) ? (tail.StartX + tail.X) / 2 : tail.MidX,
-                    MidY = double.IsNaN(tail.MidY) ? (tail.StartY + tail.Y) / 2 : tail.MidY,
-                    X = tail.X,
-                    Y = tail.Y,
-                    Width = tail.Width,
-                    // 구버전(말풍선 단위) 저장 호환: 말풍선 값이 켜져 있으면 모든 꼬리에 적용.
-                    TailInward = tail.TailInward || bubbleData.TailInward
-                }));
-                UpdateBubbleGeometry(bubble);
-
-                AttachBubbleToPanelOverlay(bubble);
-                if (!bubbleData.IsCropped)
-                {
-                    SetBubbleCrop(bubble, false);
-                }
-
-                SetBubbleLocked(bubble, bubbleData.IsLocked);
-                bubble.TextBlock.OutlineEnabled = bubbleData.HasTextOutline;
-                bubble.TextBlock.Fill = new SolidColorBrush(ParseColorOr(bubbleData.FillColor, Colors.Black));
-                bubble.TextBlock.Stroke = new SolidColorBrush(ParseColorOr(bubbleData.StrokeColor, Colors.White));
-                bubble.BackgroundBrush = new SolidColorBrush(ParseColorOr(bubbleData.BackgroundColor, Colors.White));
-                bubble.ShapePath.Fill = bubble.BackgroundBrush;
-                panel.Bubbles.Add(bubble);
-            }
-
-            UpdateBubbleOrder(panel);
-            UpdateMergedBubbleOutlines();
-            panel.SelectedImage = panel.Images.LastOrDefault();
-            panel.Placeholder.Visibility = Visibility.Collapsed;
-            SetPanelLocked(panel, panelData.IsLocked);
-
-            // 칸 사변형 모서리 복원.
-            panel.CornerMode = panelData.CornerMode;
-            ApplyArrayToPanelOffsets(panelData.CornerOffsets, panel.CornerOffsets);
-            UpdatePanelShape(panel);
         }
 
         // 페이지를 열거나 넘어갈 때는 칸을 자동 선택하지 않고 모든 선택을 해제한다.
@@ -316,6 +259,111 @@ public partial class MainWindow : Window
 
         UpdateLayoutSummary();
         UpdatePageIndicator();
+    }
+
+    // --- DTO로부터 런타임 오브젝트 생성(불러오기·붙여넣기 공용) ---
+
+    private PanelImage? AddImageFromData(ComicPanel panel, PanelImageData imageData)
+    {
+        var imagePath = ResolveProjectPath(imageData.Path);
+        if (!File.Exists(imagePath))
+        {
+            return null;
+        }
+
+        var image = AddPanelImage(panel, imagePath);
+        image.Scale.ScaleX = imageData.Scale <= 0 ? 1 : imageData.Scale;
+        image.Scale.ScaleY = imageData.Scale <= 0 ? 1 : imageData.Scale;
+        image.Translate.X = imageData.TranslateX;
+        image.Translate.Y = imageData.TranslateY;
+        image.PivotX = imageData.PivotX;
+        image.PivotY = imageData.PivotY;
+        SetImageCrop(image, imageData.IsCropped);
+        SetImageLocked(image, imageData.IsLocked);
+        return image;
+    }
+
+    private SpeechBubble AddBubbleFromData(ComicPanel panel, SpeechBubbleData bubbleData)
+    {
+        var bubble = CreateSpeechBubble(
+            panel,
+            bubbleData.Text,
+            bubbleData.Width,
+            bubbleData.Height,
+            bubbleData.FontSize,
+            bubbleData.X,
+            bubbleData.Y);
+
+        bubble.TextBlock.Margin = new Thickness(bubbleData.TextMarginLeft, bubbleData.TextMarginTop, bubbleData.TextMarginRight, bubbleData.TextMarginBottom);
+
+        var (mappedShape, legacyStrength) = MapShape(bubbleData.Shape);
+        bubble.Shape = mappedShape;
+        bubble.ShapeStrength = legacyStrength ?? bubbleData.ShapeStrength;
+        bubble.ShapeCount = bubbleData.ShapeCount <= 0 ? 9 : bubbleData.ShapeCount;
+        bubble.PivotX = bubbleData.PivotX;
+        bubble.PivotY = bubbleData.PivotY;
+        bubble.Tails.Clear();
+        bubble.Tails.AddRange(bubbleData.Tails.Select(tail => new BubbleTail
+        {
+            StartX = tail.StartX,
+            StartY = tail.StartY,
+            MidX = double.IsNaN(tail.MidX) ? (tail.StartX + tail.X) / 2 : tail.MidX,
+            MidY = double.IsNaN(tail.MidY) ? (tail.StartY + tail.Y) / 2 : tail.MidY,
+            X = tail.X,
+            Y = tail.Y,
+            Width = tail.Width,
+            // 구버전(말풍선 단위) 저장 호환: 말풍선 값이 켜져 있으면 모든 꼬리에 적용.
+            TailInward = tail.TailInward || bubbleData.TailInward
+        }));
+        UpdateBubbleGeometry(bubble);
+
+        AttachBubbleToPanelOverlay(bubble);
+        if (!bubbleData.IsCropped)
+        {
+            SetBubbleCrop(bubble, false);
+        }
+
+        SetBubbleLocked(bubble, bubbleData.IsLocked);
+        bubble.TextBlock.OutlineEnabled = bubbleData.HasTextOutline;
+        bubble.TextBlock.Fill = new SolidColorBrush(ParseColorOr(bubbleData.FillColor, Colors.Black));
+        bubble.TextBlock.Stroke = new SolidColorBrush(ParseColorOr(bubbleData.StrokeColor, Colors.White));
+        bubble.BackgroundBrush = new SolidColorBrush(ParseColorOr(bubbleData.BackgroundColor, Colors.White));
+        bubble.ShapePath.Fill = bubble.BackgroundBrush;
+        panel.Bubbles.Add(bubble);
+        return bubble;
+    }
+
+    private ComicPanel CreatePanelFromData(ComicPanelData panelData, double? overrideX = null, double? overrideY = null, int? overrideNumber = null)
+    {
+        var panel = CreatePanel(
+            overrideNumber ?? panelData.Number,
+            overrideX ?? panelData.X,
+            overrideY ?? panelData.Y,
+            panelData.Width,
+            panelData.Height);
+        AddPanel(panel);
+
+        foreach (var imageData in panelData.Images)
+        {
+            AddImageFromData(panel, imageData);
+        }
+
+        foreach (var bubbleData in panelData.Bubbles)
+        {
+            AddBubbleFromData(panel, bubbleData);
+        }
+
+        UpdateBubbleOrder(panel);
+        UpdateMergedBubbleOutlines();
+        panel.SelectedImage = panel.Images.LastOrDefault();
+        panel.Placeholder.Visibility = Visibility.Collapsed;
+        SetPanelLocked(panel, panelData.IsLocked);
+
+        // 칸 사변형 모서리 복원.
+        panel.CornerMode = panelData.CornerMode;
+        ApplyArrayToPanelOffsets(panelData.CornerOffsets, panel.CornerOffsets);
+        UpdatePanelShape(panel);
+        return panel;
     }
 
     private void ClearPageVisuals()

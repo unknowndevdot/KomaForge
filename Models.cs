@@ -115,6 +115,10 @@ public sealed class PanelImage
     public bool IsCropped { get; set; } = true;
     public bool IsLocked { get; set; }
 
+    // 칸 리사이즈 시 따라갈 기준점(0~1). X: 0=좌, 1=우 / Y: 0=하, 1=상. 기본 (0,1)=좌상단 고정.
+    public double PivotX { get; set; }
+    public double PivotY { get; set; } = 1;
+
     // 픽셀 알파 히트테스트용 BGRA 변환본 캐시. Key가 현재 소스와 같으면 Value를 재사용한다
     // (애니메이션/동영상 프레임 교체 시 소스 참조가 바뀌면 자동으로 다시 만든다).
     public BitmapSource? AlphaCacheKey { get; set; }
@@ -187,6 +191,9 @@ public sealed class SpeechBubble
     public List<BubbleTail> Tails { get; } = new();
     public double RelativeX { get; set; }
     public double RelativeY { get; set; }
+    // 칸 리사이즈 시 따라갈 기준점(0~1). X: 0=좌, 1=우 / Y: 0=하, 1=상. 기본 (0,1)=좌상단 고정.
+    public double PivotX { get; set; }
+    public double PivotY { get; set; } = 1;
 
     public override string ToString()
     {

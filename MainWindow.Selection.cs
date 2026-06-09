@@ -102,6 +102,8 @@ public partial class MainWindow : Window
         _isLoadingInspector = true;
         ImageCropCheckBox.IsChecked = image.IsCropped;
         ImageLockCheckBox.IsChecked = image.IsLocked;
+        ImagePivotXBox.Text = $"{image.PivotX:0.##}";
+        ImagePivotYBox.Text = $"{image.PivotY:0.##}";
         _isLoadingInspector = false;
         UpdateSelectionLabels();
         UpdateSelectionVisuals();
@@ -109,8 +111,11 @@ public partial class MainWindow : Window
 
     private void ApplyPanelValues(ComicPanel panel)
     {
+        var dW = PanelWidthSlider.Value - panel.Frame.Width;
+        var dH = PanelHeightSlider.Value - panel.Frame.Height;
         panel.Frame.Width = PanelWidthSlider.Value;
         panel.Frame.Height = PanelHeightSlider.Value;
+        ApplyPivotShift(panel, dW, dH);
         UpdatePanelImageSizes(panel);
         SetPanelPosition(panel, PanelXSlider.Value, PanelYSlider.Value);
         UpdateFreeBubblesForPanel(panel);
@@ -143,6 +148,8 @@ public partial class MainWindow : Window
         SelectedBubbleTextBox.Text = bubble.TextBlock.Text;
         BubbleCropCheckBox.IsChecked = bubble.IsCropped;
         BubbleLockCheckBox.IsChecked = bubble.IsLocked;
+        BubblePivotXBox.Text = $"{bubble.PivotX:0.##}";
+        BubblePivotYBox.Text = $"{bubble.PivotY:0.##}";
         BubbleOutlineCheckBox.IsChecked = bubble.TextBlock.OutlineEnabled;
         SelectComboColor(BubbleFillColorComboBox, ToHex(bubble.TextBlock.Fill));
         SelectComboColor(BubbleStrokeColorComboBox, ToHex(bubble.TextBlock.Stroke));

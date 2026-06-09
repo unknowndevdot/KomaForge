@@ -7,7 +7,34 @@
         MinWidth="980"
         MinHeight="640"
         Background="{StaticResource WindowBackgroundBrush}">
-    <Grid>
+    <DockPanel>
+        <Menu DockPanel.Dock="Top" Background="#F3F0EA">
+            <MenuItem Header="파일(_F)">
+                <MenuItem Header="불러오기..." Click="LoadProject_Click" />
+                <MenuItem Header="저장" InputGestureText="Ctrl+S" Click="SaveMenuItem_Click" />
+                <MenuItem Header="다른 이름으로 저장..." Click="SaveProject_Click" />
+                <Separator />
+                <MenuItem Header="페이지 이미지로 내보내기..." Click="ExportPagesAsImages_Click" />
+                <Separator />
+                <MenuItem Header="종료" Click="ExitMenuItem_Click" />
+            </MenuItem>
+            <MenuItem Header="편집(_E)">
+                <MenuItem x:Name="UndoMenuItem" Header="실행취소" InputGestureText="Ctrl+Z" Click="Undo_Click" />
+                <MenuItem x:Name="RedoMenuItem" Header="다시실행" InputGestureText="Ctrl+Y" Click="Redo_Click" />
+                <Separator />
+                <MenuItem Header="잘라내기" InputGestureText="Ctrl+X" Click="Cut_Click" />
+                <MenuItem Header="복사" InputGestureText="Ctrl+C" Click="Copy_Click" />
+                <MenuItem Header="붙여넣기" InputGestureText="Ctrl+V" Click="Paste_Click" />
+            </MenuItem>
+            <MenuItem Header="보기(_V)">
+                <MenuItem x:Name="PageFitMenuItem"
+                          Header="페이지 쪽 맞춤"
+                          IsCheckable="True"
+                          Checked="PageFitCheckBox_Changed"
+                          Unchecked="PageFitCheckBox_Changed" />
+            </MenuItem>
+        </Menu>
+        <Grid>
         <Grid.ColumnDefinitions>
             <ColumnDefinition x:Name="InspectorColumn" Width="360" />
             <ColumnDefinition Width="*" />
@@ -23,29 +50,6 @@
                           VerticalScrollBarVisibility="Auto"
                           PreviewMouseWheel="InspectorScrollViewer_PreviewMouseWheel">
                 <StackPanel Margin="0,0,12,0">
-                    <UniformGrid Rows="1" Columns="4" Margin="0,0,0,8">
-                        <Button Content="저장"
-                                Click="SaveProject_Click"
-                                Margin="0,0,4,0" />
-                        <Button Content="불러오기"
-                                Click="LoadProject_Click"
-                                Margin="0,0,4,0" />
-                        <Button x:Name="UndoButton"
-                                Content="↶ 실행취소"
-                                Click="Undo_Click"
-                                ToolTip="실행 취소 (Ctrl+Z)"
-                                Margin="0,0,4,0" />
-                        <Button x:Name="RedoButton"
-                                Content="↷ 다시실행"
-                                Click="Redo_Click"
-                                ToolTip="다시 실행 (Ctrl+Y)"
-                                Margin="0" />
-                    </UniformGrid>
-                    <Button Content="페이지 이미지로 내보내기"
-                            Click="ExportPagesAsImages_Click"
-                            ToolTip="각 페이지를 PNG 이미지 한 장씩으로 내보냅니다."
-                            Margin="0,0,0,12" />
-
                     <TextBlock Text="만화 제목"
                                Foreground="#55514A"
                                Margin="0,0,0,6" />
@@ -55,13 +59,6 @@
                              VerticalContentAlignment="Center"
                              TextChanged="ComicTitleTextBox_TextChanged"
                              Margin="0,0,0,18" />
-
-                    <CheckBox x:Name="PageFitCheckBox"
-                              Content="페이지 쪽 맞춤"
-                              IsChecked="False"
-                              Checked="PageFitCheckBox_Changed"
-                              Unchecked="PageFitCheckBox_Changed"
-                              Margin="0,0,0,16" />
 
                     <Border Style="{StaticResource InspectorSection}">
                     <StackPanel>
@@ -235,7 +232,18 @@
                               IsChecked="True"
                               Checked="ImageCropCheckBox_Changed"
                               Unchecked="ImageCropCheckBox_Changed"
-                              Margin="0,0,0,18" />
+                              Margin="0,0,0,8" />
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,18">
+                        <TextBlock Text="기준점"
+                                   Width="64"
+                                   VerticalAlignment="Center"
+                                   Foreground="#55514A"
+                                   Background="Transparent"
+                                   ToolTip="X: 0=좌 1=우 / Y: 0=하 1=상 (칸 크기 조절 시 따라갈 위치)" />
+                        <TextBox x:Name="ImagePivotXBox" Width="44" Text="0" TextChanged="ImagePivotBox_Changed" />
+                        <TextBlock Text="," VerticalAlignment="Center" Margin="4,0" Foreground="#55514A" />
+                        <TextBox x:Name="ImagePivotYBox" Width="44" Text="1" TextChanged="ImagePivotBox_Changed" />
+                    </StackPanel>
                     </StackPanel>
 
                     <StackPanel Visibility="Collapsed">
@@ -311,6 +319,17 @@
                               Checked="BubbleCropCheckBox_Changed"
                               Unchecked="BubbleCropCheckBox_Changed"
                               Margin="0,0,0,8" />
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                        <TextBlock Text="기준점"
+                                   Width="64"
+                                   VerticalAlignment="Center"
+                                   Foreground="#55514A"
+                                   Background="Transparent"
+                                   ToolTip="X: 0=좌 1=우 / Y: 0=하 1=상 (칸 크기 조절 시 따라갈 위치)" />
+                        <TextBox x:Name="BubblePivotXBox" Width="44" Text="0" TextChanged="BubblePivotBox_Changed" />
+                        <TextBlock Text="," VerticalAlignment="Center" Margin="4,0" Foreground="#55514A" />
+                        <TextBox x:Name="BubblePivotYBox" Width="44" Text="1" TextChanged="BubblePivotBox_Changed" />
+                    </StackPanel>
                     <TextBlock Text="말풍선 텍스트"
                                Foreground="#55514A"
                                Margin="0,0,0,6" />
@@ -625,4 +644,5 @@
             </Border>
         </Grid>
     </Grid>
+    </DockPanel>
 </Window>

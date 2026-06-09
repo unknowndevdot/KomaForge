@@ -471,12 +471,37 @@ public partial class MainWindow : Window
         var width = Math.Max(PanelWidthSlider.Minimum, panel.Frame.Width + e.HorizontalChange);
         var height = Math.Max(PanelHeightSlider.Minimum, panel.Frame.Height + e.VerticalChange);
 
+        var dW = width - panel.Frame.Width;
+        var dH = height - panel.Frame.Height;
         panel.Frame.Width = width;
         panel.Frame.Height = height;
+        ApplyPivotShift(panel, dW, dH);
         UpdatePanelImageSizes(panel);
         LoadPanelValues(panel);
         UpdateFreeBubblesForPanel(panel);
         PositionPanelCornerHandles();
+    }
+
+    // 칸 크기 변화량(dW,dH)에 맞춰 각 이미지·말풍선을 자기 기준점(Pivot)만큼 이동시킨다.
+    // Pivot X:0=좌,1=우 / Y:0=하,1=상. (0,1)=좌상단이면 이동량이 0이라 그대로 고정된다.
+    private void ApplyPivotShift(ComicPanel panel, double dW, double dH)
+    {
+        if (dW == 0 && dH == 0)
+        {
+            return;
+        }
+
+        foreach (var image in panel.Images)
+        {
+            image.Translate.X += image.PivotX * dW;
+            image.Translate.Y += (1 - image.PivotY) * dH;
+        }
+
+        foreach (var bubble in panel.Bubbles)
+        {
+            var pos = GetBubblePositionInOwnerPanel(bubble);
+            SetBubblePositionInOwnerPanel(bubble, pos.X + bubble.PivotX * dW, pos.Y + (1 - bubble.PivotY) * dH);
+        }
     }
 
     private void BeginBubbleDrag(SpeechBubble bubble, MouseButtonEventArgs e)
