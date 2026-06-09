@@ -9,8 +9,8 @@
         <SolidColorBrush x:Key="TextBrush" Color="#202124" />
 
         <Style TargetType="Button">
-            <Setter Property="MinHeight" Value="34" />
-            <Setter Property="Padding" Value="12,6" />
+            <Setter Property="MinHeight" Value="24" />
+            <Setter Property="Padding" Value="10,2" />
             <Setter Property="Margin" Value="0,0,8,0" />
             <Setter Property="FontSize" Value="13" />
             <Setter Property="Cursor" Value="Hand" />

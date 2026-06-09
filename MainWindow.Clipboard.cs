@@ -160,7 +160,7 @@ public partial class MainWindow : Window
         return false;
     }
 
-    // 이미지 붙여넣기: 현재 선택된(또는 마지막) 칸에 기준점·설정을 유지한 채 우하단으로 살짝 옮겨 넣는다.
+    // 이미지 붙여넣기: 대상 칸에 같은 위치·크기 이미지가 있으면 우하단으로 밀어 넣는다(없으면 같은 위치).
     private void PasteImage(PanelImageData data)
     {
         var target = _selectedPanel ?? _panels.LastOrDefault();
@@ -170,6 +170,14 @@ public partial class MainWindow : Window
             return;
         }
 
+        var tx = data.TranslateX;
+        var ty = data.TranslateY;
+        while (ImageExistsAt(target, tx, ty, data.Scale))
+        {
+            tx += PasteOffset;
+            ty += PasteOffset;
+        }
+
         var image = AddImageFromData(target, data);
         if (image == null)
         {
@@ -177,15 +185,31 @@ public partial class MainWindow : Window
             return;
         }
 
-        image.Translate.X += PasteOffset;
-        image.Translate.Y += PasteOffset;
+        image.Translate.X = tx;
+        image.Translate.Y = ty;
         UpdateImageList(target);
         SelectImage(image);
         ScrollInspectorToSection();
         UpdateStatus("이미지를 붙여넣었습니다.");
     }
 
-    // 말풍선 붙여넣기: 현재 선택된(또는 마지막) 칸에 우하단으로 살짝 옮겨 넣는다.
+    private static bool ImageExistsAt(ComicPanel panel, double translateX, double translateY, double scale)
+    {
+        const double eps = 0.5;
+        foreach (var img in panel.Images)
+        {
+            if (Math.Abs(img.Translate.X - translateX) < eps &&
+                Math.Abs(img.Translate.Y - translateY) < eps &&
+                Math.Abs(img.Scale.ScaleX - scale) < 0.001)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // 말풍선 붙여넣기: 대상 칸에 같은 위치·크기 말풍선이 있으면 우하단으로 밀어 넣는다(없으면 같은 위치).
     private void PasteBubble(SpeechBubbleData data)
     {
         var target = _selectedPanel ?? _panels.LastOrDefault();
@@ -195,14 +219,39 @@ public partial class MainWindow : Window
             return;
         }
 
+        var x = data.X;
+        var y = data.Y;
+        while (BubbleExistsAt(target, x, y, data.Width, data.Height))
+        {
+            x += PasteOffset;
+            y += PasteOffset;
+        }
+
         var bubble = AddBubbleFromData(target, data);
-        var pos = GetBubblePositionInOwnerPanel(bubble);
-        SetBubblePositionInOwnerPanel(bubble, pos.X + PasteOffset, pos.Y + PasteOffset);
+        SetBubblePositionInOwnerPanel(bubble, x, y);
         UpdateBubbleOrder(target);
         UpdateMergedBubbleOutlines(target);
         UpdateBubbleList(target);
         SelectBubble(bubble);
         ScrollInspectorToSection();
         UpdateStatus("말풍선을 붙여넣었습니다.");
+    }
+
+    private bool BubbleExistsAt(ComicPanel panel, double x, double y, double width, double height)
+    {
+        const double eps = 0.5;
+        foreach (var b in panel.Bubbles)
+        {
+            var pos = GetBubblePositionInOwnerPanel(b);
+            if (Math.Abs(pos.X - x) < eps &&
+                Math.Abs(pos.Y - y) < eps &&
+                Math.Abs(b.Container.Width - width) < eps &&
+                Math.Abs(b.Container.Height - height) < eps)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

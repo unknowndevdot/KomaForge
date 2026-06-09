@@ -173,6 +173,14 @@ public partial class MainWindow : Window
                 return;
             }
 
+            // Ctrl+O: 프로젝트 불러오기.
+            if (e.Key == Key.O)
+            {
+                LoadProject_Click(this, new RoutedEventArgs());
+                e.Handled = true;
+                return;
+            }
+
             // Ctrl+R: 선택 대상 리셋(이미지=100% 원본, 칸=기본 사각형).
             if (e.Key == Key.R)
             {

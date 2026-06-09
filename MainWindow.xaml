@@ -10,7 +10,7 @@
     <DockPanel>
         <Menu DockPanel.Dock="Top" Background="#F3F0EA">
             <MenuItem Header="파일(_F)">
-                <MenuItem Header="불러오기..." Click="LoadProject_Click" />
+                <MenuItem Header="불러오기..." InputGestureText="Ctrl+O" Click="LoadProject_Click" />
                 <MenuItem Header="저장" InputGestureText="Ctrl+S" Click="SaveMenuItem_Click" />
                 <MenuItem Header="다른 이름으로 저장..." Click="SaveProject_Click" />
                 <Separator />
@@ -54,8 +54,7 @@
                                Foreground="#55514A"
                                Margin="0,0,0,6" />
                     <TextBox x:Name="ComicTitleTextBox"
-                             MinHeight="34"
-                             Padding="8,5"
+                             Padding="6,2"
                              VerticalContentAlignment="Center"
                              TextChanged="ComicTitleTextBox_TextChanged"
                              Margin="0,0,0,18" />
@@ -95,8 +94,7 @@
                         <TextBox x:Name="PageWidthTextBox"
                                  Grid.Column="0"
                                  Text="820"
-                                 MinHeight="34"
-                                 Padding="8,5"
+                                 Padding="6,2"
                                  VerticalContentAlignment="Center"
                                  TextChanged="PageSizeTextBox_TextChanged" />
                         <TextBlock Text="×"
@@ -107,8 +105,7 @@
                         <TextBox x:Name="PageHeightTextBox"
                                  Grid.Column="2"
                                  Text="1120"
-                                 MinHeight="34"
-                                 Padding="8,5"
+                                 Padding="6,2"
                                  VerticalContentAlignment="Center"
                                  TextChanged="PageSizeTextBox_TextChanged" />
                     </Grid>
@@ -125,22 +122,19 @@
                     <UniformGrid Rows="1" Columns="3" Margin="0,0,0,8">
                         <TextBox x:Name="LayoutPatternTextBox"
                                  Text="1,2,1"
-                                 MinHeight="34"
-                                 Padding="8,5"
+                                 Padding="6,2"
                                  VerticalContentAlignment="Center"
                                  Margin="0,0,4,0"
                                  ToolTip="칸 구성 (예: 1,2,1)" />
                         <TextBox x:Name="AutoMarginTextBox"
                                  Text="24"
-                                 MinHeight="34"
-                                 Padding="8,5"
+                                 Padding="6,2"
                                  VerticalContentAlignment="Center"
                                  Margin="0,0,4,0"
                                  ToolTip="자동 생성 여백" />
                         <TextBox x:Name="AutoGutterTextBox"
                                  Text="14"
-                                 MinHeight="34"
-                                 Padding="8,5"
+                                 Padding="6,2"
                                  VerticalContentAlignment="Center"
                                  Margin="0"
                                  ToolTip="자동 생성 간격" />
