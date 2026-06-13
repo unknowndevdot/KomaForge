@@ -29,12 +29,22 @@ public partial class MainWindow
         _colorCombos.Add((BubbleFillColorComboBox, false));
         _colorCombos.Add((BubbleStrokeColorComboBox, true));
         _colorCombos.Add((BubbleBackgroundColorComboBox, true));
+        _colorCombos.Add((ImageGradientColorComboBox, true)); // 투명 포함(투명=이미지 사라짐)
+        _colorCombos.Add((PanelBackgroundColorComboBox, false)); // 칸 배경(단색)
+        _colorCombos.Add((PanelBorderColorComboBox, false));     // 칸 테두리(단색)
+        _colorCombos.Add((PageBackgroundColorComboBox, false));  // 페이지 배경(단색)
+        _colorCombos.Add((BubbleBorderColorComboBox, false));    // 말풍선 테두리(단색)
 
         RebuildColorCombos();
 
         SelectComboColor(BubbleFillColorComboBox, "#000000");
         SelectComboColor(BubbleStrokeColorComboBox, TransparentHex); // 기본 아웃라인 '없음'
         SelectComboColor(BubbleBackgroundColorComboBox, "#FFFFFF");
+        SelectComboColor(ImageGradientColorComboBox, TransparentHex); // 기본 투명(사라짐)
+        SelectComboColor(PanelBackgroundColorComboBox, "#FFFFFF");    // 기본 흰색
+        SelectComboColor(PanelBorderColorComboBox, "#000000");       // 기본 검정
+        SelectComboColor(PageBackgroundColorComboBox, "#FFFFFF");     // 기본 흰색
+        SelectComboColor(BubbleBorderColorComboBox, "#000000");      // 기본 검정
     }
 
     // 모든 색 콤보를 [없음?]+[최근색]+[팔레트]+[직접 지정…] 순으로 다시 채운다(현재 선택은 유지).
@@ -145,10 +155,15 @@ public partial class MainWindow
         RebuildColorCombos();
     }
 
-    // 콤보 선택 변경 공통 처리: '직접 지정…'이면 색 선택기를 열고, 그 외엔 선택색을 적용한다.
+    // 말풍선 색 콤보 변경(선택된 말풍선이 있을 때만).
     private void OnBubbleColorComboChanged(ComboBox combo, Func<Color> getCurrent, Action<Color> apply, Color fallback)
+        => OnColorComboChanged(combo, _selectedBubble != null, getCurrent, apply, fallback);
+
+    // 콤보 선택 변경 공통 처리: '직접 지정…'이면 색 선택기를 열고, 그 외엔 선택색을 적용한다.
+    // active = 적용 대상(말풍선/이미지 등)이 선택돼 있는지.
+    private void OnColorComboChanged(ComboBox combo, bool active, Func<Color> getCurrent, Action<Color> apply, Color fallback)
     {
-        if (_isLoadingInspector || _suppressColorCombo || _selectedBubble == null)
+        if (_isLoadingInspector || _suppressColorCombo || !active)
         {
             return;
         }

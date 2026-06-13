@@ -92,6 +92,20 @@ public partial class MainWindow : Window
             selectionBorder.OpacityMask = new ImageBrush(maskBitmap) { Stretch = Stretch.Uniform };
         }
 
+        // 색 그라데이션 오버레이: 이미지와 같은 변환을 공유하고, 이미지 모양에만 입히도록 같은 마스크를 쓴다.
+        var gradientOverlay = new Border
+        {
+            Width = panel.Frame.Width,
+            Height = panel.Frame.Height,
+            IsHitTestVisible = false,
+            RenderTransform = transform,
+            RenderTransformOrigin = new Point(0.5, 0.5)
+        };
+        if (image?.Source is BitmapSource gMask)
+        {
+            gradientOverlay.OpacityMask = new ImageBrush(gMask) { Stretch = Stretch.Uniform };
+        }
+
         var layer = new Grid
         {
             Width = panel.Frame.Width,
@@ -100,12 +114,14 @@ public partial class MainWindow : Window
             ClipToBounds = false
         };
         layer.Children.Add(content);
+        layer.Children.Add(gradientOverlay); // 콘텐츠 위, 선택 틴트 아래.
         layer.Children.Add(selectionBorder);
 
         var panelImage = new PanelImage(panel, path, kind, layer, content, image, media, selectionBorder, scale, translate)
         {
             Frames = frames,
             FrameDelays = delays,
+            GradientOverlay = gradientOverlay,
             Id = NewObjectId()
         };
         panel.Images.Add(panelImage);
@@ -128,6 +144,73 @@ public partial class MainWindow : Window
 
         return panelImage;
     }
+
+    // 가장자리 그라데이션 적용. 대상 색이 투명(알파 0)이면 이미지를 점점 사라지게(OpacityMask),
+    // 색이면 그 색을 방향 변에서 반대편으로 페이드시켜 칠한다(오버레이). 게이지로 페이드 구간을 정한다.
+    private static void ApplyImageGradient(PanelImage image)
+    {
+        var overlay = image.GradientOverlay;
+        if (overlay == null)
+        {
+            return;
+        }
+
+        if (image.GradientDirection == ImageGradientDirection.None)
+        {
+            overlay.Background = null;
+            image.Content.OpacityMask = null;
+            return;
+        }
+
+        // 축: u=0이 대상(방향) 변, u=1이 원본(반대편) 변(RelativeToBoundingBox).
+        var (start, end) = image.GradientDirection switch
+        {
+            ImageGradientDirection.Top => (new Point(0, 0), new Point(0, 1)),
+            ImageGradientDirection.Bottom => (new Point(0, 1), new Point(0, 0)),
+            ImageGradientDirection.Left => (new Point(0, 0), new Point(1, 0)),
+            _ => (new Point(1, 0), new Point(0, 0)), // Right
+        };
+        var s = Math.Clamp(Math.Min(image.GradientStart, image.GradientEnd), 0, 100) / 100.0;
+        var e = Math.Clamp(Math.Max(image.GradientStart, image.GradientEnd), 0, 100) / 100.0;
+
+        if (image.GradientColor.A == 0)
+        {
+            // 투명 모드: 이미지 자체를 대상 변에서 사라지게 한다(색 오버레이 없음).
+            overlay.Background = null;
+            var clear = Color.FromArgb(0, 255, 255, 255);
+            var solid = Color.FromArgb(255, 255, 255, 255);
+            var mask = new LinearGradientBrush { StartPoint = start, EndPoint = end };
+            mask.GradientStops.Add(new GradientStop(clear, 0));   // 대상 변 = 완전 투명(사라짐)
+            mask.GradientStops.Add(new GradientStop(clear, s));
+            mask.GradientStops.Add(new GradientStop(solid, e));   // 이후 = 원본(불투명)
+            mask.GradientStops.Add(new GradientStop(solid, 1));
+            mask.Freeze();
+            image.Content.OpacityMask = mask;
+            return;
+        }
+
+        // 색 모드: 대상 변에서 그 색(불투명) → 반대편으로 갈수록 색이 사라져 원본이 드러난다.
+        image.Content.OpacityMask = null;
+        var c = image.GradientColor;
+        var cClear = Color.FromArgb(0, c.R, c.G, c.B);
+        var brush = new LinearGradientBrush { StartPoint = start, EndPoint = end };
+        brush.GradientStops.Add(new GradientStop(c, 0));        // 대상 변 = 색
+        brush.GradientStops.Add(new GradientStop(c, s));
+        brush.GradientStops.Add(new GradientStop(cClear, e));   // 이후 = 색 없음(원본)
+        brush.GradientStops.Add(new GradientStop(cClear, 1));
+        brush.Freeze();
+        overlay.Background = brush;
+    }
+
+    // 콤보 Tag 문자열 ↔ 방향 enum.
+    private static ImageGradientDirection ParseGradientDirection(string? tag) => tag switch
+    {
+        "Top" => ImageGradientDirection.Top,
+        "Bottom" => ImageGradientDirection.Bottom,
+        "Left" => ImageGradientDirection.Left,
+        "Right" => ImageGradientDirection.Right,
+        _ => ImageGradientDirection.None
+    };
 
     // 이미지의 중심을 콘텐츠 좌표상의 지정 지점에 맞춘다(스케일과 무관, 중심 기준 변환).
     private static void CenterImageAtPoint(PanelImage image, Point center)

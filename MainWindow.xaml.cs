@@ -120,6 +120,7 @@ public partial class MainWindow : Window
         LoadWindowSettings();
         RefreshShortcutMenuText(); // 메뉴의 단축키 표기를 현재 설정으로 맞춘다
         InitColorCombos(); // 팔레트 + 최근색 + '직접 지정…' 으로 색 콤보 구성(LoadWindowSettings 이후라 최근색 반영).
+        InitBubbleFontCombo(); // 시스템 글꼴 목록으로 말풍선 글꼴 콤보 구성.
         Closing += (_, _) =>
         {
             SaveWindowSettings();
@@ -156,6 +157,11 @@ public partial class MainWindow : Window
             _undoStack.Clear();
             _redoStack.Clear();
             UpdateUndoRedoButtons();
+
+            // 긴 페이지 성능: 스크롤/크기 변경 시 뷰포트 밖 칸을 컬링한다.
+            PageScrollViewer.ScrollChanged += (_, _) => CullOffscreenPanels();
+            PageScrollViewer.SizeChanged += (_, _) => CullOffscreenPanels();
+            CullOffscreenPanels();
         };
     }
 
@@ -566,21 +572,45 @@ public partial class MainWindow : Window
         UpdatePageFit();
     }
 
+    private bool _updatingFitMenu;
+
+    // 쪽 맞춤 / 폭 맞춤은 라디오처럼 상호 배타(둘 중 하나만 켜짐).
     private void PageFitCheckBox_Changed(object sender, RoutedEventArgs e)
     {
+        if (_updatingFitMenu)
+        {
+            return;
+        }
+
+        _updatingFitMenu = true;
+        if (ReferenceEquals(sender, PageFitMenuItem) && PageFitMenuItem.IsChecked == true)
+        {
+            PageWidthFitMenuItem.IsChecked = false;
+        }
+        else if (ReferenceEquals(sender, PageWidthFitMenuItem) && PageWidthFitMenuItem.IsChecked == true)
+        {
+            PageFitMenuItem.IsChecked = false;
+        }
+        _updatingFitMenu = false;
+
         UpdatePageFit();
     }
 
-    private void BlackBackgroundCheckBox_Changed(object sender, RoutedEventArgs e)
+    private void PageBackgroundColorComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        ApplyPageBackground();
+        OnColorComboChanged(PageBackgroundColorComboBox, true,
+            () => CurrentPageBackgroundColor(),
+            _ => ApplyPageBackground(), // 콤보 선택이 최신이면 그 색을 읽어 적용.
+            Colors.White);
     }
 
-    // 페이지 배경을 검은색/흰색으로 적용한다(내보내기 결과 배경에도 반영됨).
+    // 현재 페이지 배경색(콤보 선택값, 없으면 흰색).
+    private Color CurrentPageBackgroundColor() => GetComboColor(PageBackgroundColorComboBox, Colors.White);
+
+    // 페이지 배경을 선택한 색으로 적용한다(내보내기 결과 배경에도 반영됨).
     private void ApplyPageBackground()
     {
-        var black = BlackBackgroundCheckBox?.IsChecked == true;
-        var brush = black ? Brushes.Black : Brushes.White;
+        var brush = new SolidColorBrush(CurrentPageBackgroundColor());
         if (PageSurface != null)
         {
             PageSurface.Background = brush;
@@ -936,7 +966,7 @@ public partial class MainWindow : Window
         UpdatePageFit();
     }
 
-    // "페이지 쪽 맞춤"이 켜져 있으면 페이지 전체가 보이도록 뷰 영역에 맞춰 축소/확대한다.
+    // "쪽 맞춤"은 페이지 전체가 보이도록, "폭 맞춤"은 페이지 너비가 뷰에 차도록 맞춘다(세로는 스크롤).
     private void UpdatePageFit()
     {
         if (PageFrame == null || PageScrollViewer == null)
@@ -944,7 +974,9 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (PageFitMenuItem?.IsChecked != true)
+        var pageFit = PageFitMenuItem?.IsChecked == true;
+        var widthFit = PageWidthFitMenuItem?.IsChecked == true;
+        if (!pageFit && !widthFit)
         {
             PageFrame.LayoutTransform = Transform.Identity;
             return;
@@ -958,13 +990,17 @@ public partial class MainWindow : Window
             return;
         }
 
-        var scale = Math.Min(availableWidth / _pageWidth, availableHeight / _pageHeight);
+        // 폭 맞춤: 너비 비율만(세로 넘치면 스크롤). 쪽 맞춤: 가로·세로 중 작은 비율(전체 보임).
+        var scale = widthFit
+            ? availableWidth / _pageWidth
+            : Math.Min(availableWidth / _pageWidth, availableHeight / _pageHeight);
         if (double.IsNaN(scale) || double.IsInfinity(scale) || scale <= 0)
         {
             scale = 1;
         }
 
         PageFrame.LayoutTransform = new ScaleTransform(scale, scale);
+        CullOffscreenPanels(); // 배율 변경으로 보이는 범위가 달라지므로 다시 컬링.
     }
 
     private void ComicTitleTextBox_TextChanged(object sender, TextChangedEventArgs e)

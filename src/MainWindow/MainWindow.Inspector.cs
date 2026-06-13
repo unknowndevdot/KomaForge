@@ -18,10 +18,33 @@ public partial class MainWindow : Window
 {
     private void AddPanel_Click(object sender, RoutedEventArgs e)
     {
-        var panel = CreatePanel(_nextPanelNumber++, PanelXSlider.Value, PanelYSlider.Value, PanelWidthSlider.Value, PanelHeightSlider.Value);
+        // 폭의 절반 크기 정사각형을, 현재 보이는 화면 중앙에 만든다.
+        var size = _pageWidth / 2.0;
+        var center = CurrentViewportCenterInPage();
+        var panel = CreatePanel(_nextPanelNumber++, center.X - size / 2.0, center.Y - size / 2.0, size, size);
         AddPanel(panel);
         SelectPanel(panel);
         UpdateStatus($"{panel.Number}번 칸을 추가했습니다.");
+    }
+
+    // 현재 스크롤 뷰포트의 중앙을 페이지(PanelCanvas) 좌표로 환산한다(스크롤·확대·페이지 맞춤 반영).
+    private Point CurrentViewportCenterInPage()
+    {
+        try
+        {
+            if (PageScrollViewer != null && PanelCanvas != null &&
+                PageScrollViewer.ViewportWidth > 0 && PageScrollViewer.ViewportHeight > 0)
+            {
+                var viewportCenter = new Point(PageScrollViewer.ViewportWidth / 2, PageScrollViewer.ViewportHeight / 2);
+                return PageScrollViewer.TransformToDescendant(PanelCanvas).Transform(viewportCenter);
+            }
+        }
+        catch
+        {
+            // 시각 트리 변환 실패 시 페이지 중앙으로.
+        }
+
+        return new Point(_pageWidth / 2.0, _pageHeight / 2.0);
     }
 
     private void DeletePanel_Click(object sender, RoutedEventArgs e)
@@ -340,6 +363,63 @@ public partial class MainWindow : Window
         UpdateInspectorLabels();
     }
 
+    // 새 말풍선에 적용할 마지막 사용 글꼴(기본 Malgun Gothic).
+    private string _lastBubbleFontFamily = "Malgun Gothic";
+
+    // 시스템 글꼴 목록으로 말풍선 글꼴 콤보를 채운다(각 항목을 자기 글꼴로 미리보기).
+    private void InitBubbleFontCombo()
+    {
+        if (BubbleFontFamilyComboBox == null)
+        {
+            return;
+        }
+
+        var families = Fonts.SystemFontFamilies
+            .Select(f => f.Source)
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Distinct()
+            .OrderBy(s => s, StringComparer.CurrentCultureIgnoreCase);
+
+        BubbleFontFamilyComboBox.Items.Clear();
+        foreach (var name in families)
+        {
+            BubbleFontFamilyComboBox.Items.Add(new ComboBoxItem
+            {
+                Content = new TextBlock { Text = name, FontFamily = new FontFamily(name) },
+                Tag = name
+            });
+        }
+    }
+
+    private void SelectBubbleFontInCombo(string family)
+    {
+        foreach (ComboBoxItem item in BubbleFontFamilyComboBox.Items)
+        {
+            if (item.Tag is string tag && string.Equals(tag, family, StringComparison.OrdinalIgnoreCase))
+            {
+                BubbleFontFamilyComboBox.SelectedItem = item;
+                return;
+            }
+        }
+
+        BubbleFontFamilyComboBox.SelectedIndex = -1;
+    }
+
+    private void BubbleFontFamilyComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isLoadingInspector || _selectedBubble == null)
+        {
+            return;
+        }
+
+        if (BubbleFontFamilyComboBox.SelectedItem is ComboBoxItem item && item.Tag is string family)
+        {
+            _selectedBubble.TextBlock.FontFamily = new FontFamily(family);
+            _lastBubbleFontFamily = family; // 새 말풍선에 이어서 적용.
+            UpdateBubbleGeometry(_selectedBubble);
+        }
+    }
+
     // 글자 크기 입력칸의 현재 값(없거나 잘못되면 18). 6~300으로 제한.
     private double CurrentFontInput()
         => double.TryParse(BubbleFontBox?.Text, out var v) ? Math.Clamp(v, 6, 300) : 18;
@@ -504,6 +584,30 @@ public partial class MainWindow : Window
             Colors.White);
     }
 
+    private void PanelBackgroundColorComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        OnColorComboChanged(PanelBackgroundColorComboBox, _selectedPanel != null,
+            () => (_selectedPanel!.QuadFill.Fill as SolidColorBrush)?.Color ?? Colors.White,
+            c => _selectedPanel!.QuadFill.Fill = new SolidColorBrush(c),
+            Colors.White);
+    }
+
+    private void PanelBorderColorComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        OnColorComboChanged(PanelBorderColorComboBox, _selectedPanel != null,
+            () => _selectedPanel!.BorderColor,
+            c => SetPanelBorderColor(_selectedPanel!, c),
+            Colors.Black);
+    }
+
+    private void BubbleBorderColorComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        OnColorComboChanged(BubbleBorderColorComboBox, _selectedBubble != null,
+            () => _selectedBubble!.BorderColor,
+            c => { _selectedBubble!.BorderColor = c; UpdateMergedBubbleOutlines(_selectedBubble.OwnerPanel); },
+            Colors.Black);
+    }
+
     private void ImageCropCheckBox_Changed(object sender, RoutedEventArgs e)
     {
         if (_isLoadingInspector || _selectedImage == null)
@@ -525,6 +629,67 @@ public partial class MainWindow : Window
 
         _selectedImage.PivotX = Math.Clamp(ParseDoubleOr(ImagePivotXBox.Text, 0), 0, 1);
         _selectedImage.PivotY = Math.Clamp(ParseDoubleOr(ImagePivotYBox.Text, 1), 0, 1);
+    }
+
+    private void ImageGradientComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        UpdateImageGradientControls();
+        if (_isLoadingInspector || _selectedImage == null)
+        {
+            return;
+        }
+
+        _selectedImage.GradientDirection = ParseGradientDirection((ImageGradientComboBox.SelectedItem as ComboBoxItem)?.Tag?.ToString());
+        ApplyImageGradient(_selectedImage);
+    }
+
+    private void ImageGradientColorComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        OnColorComboChanged(ImageGradientColorComboBox, _selectedImage != null,
+            () => _selectedImage!.GradientColor,
+            c => { _selectedImage!.GradientColor = c; ApplyImageGradient(_selectedImage); },
+            Colors.Transparent);
+    }
+
+    private void ImageGradientSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (ImageGradientStartText != null)
+        {
+            ImageGradientStartText.Text = $"시작: {ImageGradientStartSlider.Value:0}%";
+        }
+        if (ImageGradientEndText != null)
+        {
+            ImageGradientEndText.Text = $"끝: {ImageGradientEndSlider.Value:0}%";
+        }
+
+        if (_isLoadingInspector || _selectedImage == null)
+        {
+            return;
+        }
+
+        _selectedImage.GradientStart = ImageGradientStartSlider.Value;
+        _selectedImage.GradientEnd = ImageGradientEndSlider.Value;
+        ApplyImageGradient(_selectedImage);
+    }
+
+    // 방향이 '없음'이면 색·게이지 항목을 숨긴다.
+    private void UpdateImageGradientControls()
+    {
+        if (ImageGradientColorComboBox == null || ImageGradientColorLabel == null ||
+            ImageGradientStartSlider == null || ImageGradientStartText == null ||
+            ImageGradientEndSlider == null || ImageGradientEndText == null)
+        {
+            return; // XAML 초기화 중 호출 방지.
+        }
+
+        var dir = ParseGradientDirection((ImageGradientComboBox.SelectedItem as ComboBoxItem)?.Tag?.ToString());
+        var show = dir != ImageGradientDirection.None ? Visibility.Visible : Visibility.Collapsed;
+        ImageGradientColorLabel.Visibility = show;
+        ImageGradientColorComboBox.Visibility = show;
+        ImageGradientStartText.Visibility = show;
+        ImageGradientStartSlider.Visibility = show;
+        ImageGradientEndText.Visibility = show;
+        ImageGradientEndSlider.Visibility = show;
     }
 
     private void BubblePivotBox_Changed(object sender, TextChangedEventArgs e)

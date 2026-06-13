@@ -110,16 +110,25 @@ public partial class MainWindow : Window
                 UpdateBubbleShapePath(bubble);
             }
 
-            // 외곽선은 크롭 ON/OFF 그룹별로 합쳐 그린다(크롭 ON은 칸 오버레이라 사변형으로 클리핑됨).
-            panel.BubbleOutlinePath.Data = BuildMergedBubbleOutline(panel, cropped: true);
-            panel.FreeBubbleOutlinePath.Data = BuildMergedBubbleOutline(panel, cropped: false);
+            // 외곽선은 테두리색별로 합쳐 그린다(같은 색 겹침은 하나로 연결, 다른 색은 따로).
+            // 기존 단일 경로는 쓰지 않고(아래), 색 그룹마다 동적 경로를 만든다.
+            panel.BubbleOutlinePath.Data = null;
+            panel.FreeBubbleOutlinePath.Data = null;
+            foreach (var p in panel.DynamicBubbleOutlines)
+            {
+                (p.Parent as Canvas)?.Children.Remove(p);
+            }
+            panel.DynamicBubbleOutlines.Clear();
+            AddBubbleOutlineGroups(panel, panel.Overlay, cropped: true);
+            AddBubbleOutlineGroups(panel, panel.FreeOverlay, cropped: false);
         }
     }
 
-    // 한 칸의 같은 크롭 그룹 말풍선들의 본체+꼬리 도형을 모두 Union으로 합친 외곽선 도형을 만든다.
-    private static Geometry? BuildMergedBubbleOutline(ComicPanel panel, bool cropped)
+    // 한 크롭 그룹의 말풍선들을 테두리색별로 Union해, 색마다 외곽선 경로 하나를 만들어 오버레이에 추가한다.
+    private void AddBubbleOutlineGroups(ComicPanel panel, Canvas host, bool cropped)
     {
-        Geometry? merged = null;
+        var map = new Dictionary<Color, Geometry>();
+        var order = new List<Color>();
         foreach (var bubble in panel.Bubbles)
         {
             if (bubble.IsCropped != cropped)
@@ -133,12 +142,31 @@ public partial class MainWindow : Window
                 continue;
             }
 
-            merged = merged == null
-                ? geometry
-                : Geometry.Combine(merged, geometry, GeometryCombineMode.Union, null);
+            if (map.TryGetValue(bubble.BorderColor, out var existing))
+            {
+                map[bubble.BorderColor] = Geometry.Combine(existing, geometry, GeometryCombineMode.Union, null);
+            }
+            else
+            {
+                map[bubble.BorderColor] = geometry;
+                order.Add(bubble.BorderColor);
+            }
         }
 
-        return merged;
+        foreach (var color in order)
+        {
+            var path = new System.Windows.Shapes.Path
+            {
+                Data = map[color],
+                Fill = Brushes.Transparent,
+                Stroke = new SolidColorBrush(color),
+                StrokeThickness = 2,
+                IsHitTestVisible = false
+            };
+            Panel.SetZIndex(path, int.MaxValue - 1);
+            host.Children.Add(path);
+            panel.DynamicBubbleOutlines.Add(path);
+        }
     }
 
     // 한 말풍선의 본체+꼬리 도형을 오버레이 좌표로 만들어 ShapePath에 적용하고 배경색을 입힌다.
@@ -629,9 +657,9 @@ public partial class MainWindow : Window
     {
         if (_tailStartHandle == null)
         {
-            _tailStartHandle = CreateTailHandle();
-            _tailMidHandle = CreateTailHandle(Color.FromRgb(214, 122, 32));
-            _tailEndHandle = CreateTailHandle();
+            _tailStartHandle = CreateTailHandle(Color.FromRgb(43, 111, 106));  // 시작: 청록
+            _tailMidHandle = CreateTailHandle(Color.FromRgb(214, 122, 32));    // 중간: 주황
+            _tailEndHandle = CreateTailHandle(Color.FromRgb(46, 110, 200));    // 끝: 파랑
             _tailStartHandle.DragDelta += (_, e) => DragSelectedTailPoint(TailPointKind.Start, e);
             _tailMidHandle!.DragDelta += (_, e) => DragSelectedTailPoint(TailPointKind.Mid, e);
             _tailEndHandle!.DragDelta += (_, e) => DragSelectedTailPoint(TailPointKind.End, e);

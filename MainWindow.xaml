@@ -34,6 +34,11 @@
                           IsCheckable="True"
                           Checked="PageFitCheckBox_Changed"
                           Unchecked="PageFitCheckBox_Changed" />
+                <MenuItem x:Name="PageWidthFitMenuItem"
+                          Header="페이지 폭 맞춤"
+                          IsCheckable="True"
+                          Checked="PageFitCheckBox_Changed"
+                          Unchecked="PageFitCheckBox_Changed" />
             </MenuItem>
         </Menu>
         <Grid>
@@ -159,12 +164,15 @@
                                  VerticalContentAlignment="Center"
                                  TextChanged="PageSizeTextBox_TextChanged" />
                     </Grid>
-                    <CheckBox x:Name="BlackBackgroundCheckBox"
-                              Content="페이지 배경 검은색"
-                              IsChecked="False"
-                              Checked="BlackBackgroundCheckBox_Changed"
-                              Unchecked="BlackBackgroundCheckBox_Changed"
-                              Margin="0,2,0,14" />
+                    <StackPanel Orientation="Horizontal" Margin="0,2,0,14">
+                        <TextBlock Text="배경색"
+                                   Width="64"
+                                   VerticalAlignment="Center"
+                                   Foreground="#55514A" />
+                        <ComboBox x:Name="PageBackgroundColorComboBox"
+                                  Width="130"
+                                  SelectionChanged="PageBackgroundColorComboBox_SelectionChanged" />
+                    </StackPanel>
 
                     <TextBlock Text="칸 구성 / 여백 / 간격"
                                Foreground="#55514A"
@@ -275,7 +283,25 @@
                               IsChecked="False"
                               Checked="PanelCornerModeCheckBox_Changed"
                               Unchecked="PanelCornerModeCheckBox_Changed"
-                              Margin="0,0,0,0" />
+                              Margin="0,0,0,12" />
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                        <TextBlock Text="배경색"
+                                   Width="64"
+                                   VerticalAlignment="Center"
+                                   Foreground="#55514A" />
+                        <ComboBox x:Name="PanelBackgroundColorComboBox"
+                                  Width="130"
+                                  SelectionChanged="PanelBackgroundColorComboBox_SelectionChanged" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="테두리색"
+                                   Width="64"
+                                   VerticalAlignment="Center"
+                                   Foreground="#55514A" />
+                        <ComboBox x:Name="PanelBorderColorComboBox"
+                                  Width="130"
+                                  SelectionChanged="PanelBorderColorComboBox_SelectionChanged" />
+                    </StackPanel>
                     </StackPanel>
                     </StackPanel>
                     </Border>
@@ -327,6 +353,52 @@
                         <TextBlock Text="," VerticalAlignment="Center" Margin="4,0" Foreground="#55514A" />
                         <TextBox x:Name="ImagePivotYBox" Width="44" Text="1" TextChanged="ImagePivotBox_Changed" />
                     </StackPanel>
+
+                    <Border Style="{StaticResource InspectorGroup}">
+                    <StackPanel>
+                    <TextBlock Text="색 그라데이션" Style="{StaticResource GroupHeader}" />
+                    <TextBlock Text="방향"
+                               Foreground="#55514A"
+                               Margin="0,0,0,4" />
+                    <ComboBox x:Name="ImageGradientComboBox"
+                              SelectionChanged="ImageGradientComboBox_SelectionChanged"
+                              Margin="0,0,0,10">
+                        <ComboBoxItem Content="없음" Tag="None" IsSelected="True" />
+                        <ComboBoxItem Content="위" Tag="Top" />
+                        <ComboBoxItem Content="아래" Tag="Bottom" />
+                        <ComboBoxItem Content="왼쪽" Tag="Left" />
+                        <ComboBoxItem Content="오른쪽" Tag="Right" />
+                    </ComboBox>
+
+                    <TextBlock x:Name="ImageGradientColorLabel"
+                               Text="색 (투명 선택 시 이미지가 사라짐)"
+                               Foreground="#55514A"
+                               Margin="0,0,0,2" />
+                    <ComboBox x:Name="ImageGradientColorComboBox"
+                              SelectionChanged="ImageGradientColorComboBox_SelectionChanged"
+                              Margin="0,0,0,10" />
+
+                    <TextBlock x:Name="ImageGradientStartText"
+                               Foreground="#55514A"
+                               Margin="0,0,0,2" />
+                    <Slider x:Name="ImageGradientStartSlider"
+                            Minimum="0"
+                            Maximum="100"
+                            Value="40"
+                            ValueChanged="ImageGradientSlider_ValueChanged"
+                            Margin="0,0,0,10" />
+
+                    <TextBlock x:Name="ImageGradientEndText"
+                               Foreground="#55514A"
+                               Margin="0,0,0,2" />
+                    <Slider x:Name="ImageGradientEndSlider"
+                            Minimum="0"
+                            Maximum="100"
+                            Value="60"
+                            ValueChanged="ImageGradientSlider_ValueChanged"
+                            Margin="0,0,0,2" />
+                    </StackPanel>
+                    </Border>
                     </StackPanel>
 
                     <StackPanel Visibility="Collapsed">
@@ -428,6 +500,17 @@
                              Margin="0,0,0,12" />
 
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                        <TextBlock Text="글꼴"
+                                   Width="64"
+                                   VerticalAlignment="Center"
+                                   Foreground="#55514A" />
+                        <ComboBox x:Name="BubbleFontFamilyComboBox"
+                                  Width="130"
+                                  MaxDropDownHeight="320"
+                                  SelectionChanged="BubbleFontFamilyComboBox_SelectionChanged" />
+                    </StackPanel>
+
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
                         <TextBlock Text="글자 크기"
                                    Width="64"
                                    VerticalAlignment="Center"
@@ -470,6 +553,15 @@
                         <ComboBox x:Name="BubbleStrokeColorComboBox"
                                   Width="130"
                                   SelectionChanged="BubbleStrokeColorComboBox_SelectionChanged" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                        <TextBlock Text="테두리색"
+                                   Width="64"
+                                   VerticalAlignment="Center"
+                                   Foreground="#55514A" />
+                        <ComboBox x:Name="BubbleBorderColorComboBox"
+                                  Width="130"
+                                  SelectionChanged="BubbleBorderColorComboBox_SelectionChanged" />
                     </StackPanel>
                     </StackPanel>
                     </Border>

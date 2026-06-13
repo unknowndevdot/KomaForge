@@ -96,12 +96,19 @@ public partial class MainWindow : Window
         var height = (int)Math.Ceiling(_pageHeight);
         var pageRect = new Rect(0, 0, _pageWidth, _pageHeight);
 
+        // 뷰포트 컬링으로 화면 밖 칸이 Collapsed일 수 있으므로, 내보내기 전 전부 보이게 하고 레이아웃을 갱신한다.
+        foreach (var panel in _panels)
+        {
+            panel.Frame.Visibility = Visibility.Visible;
+        }
+        PanelCanvas.UpdateLayout();
+
         var visual = new DrawingVisual();
         using (var context = visual.RenderOpen())
         {
             // 배경을 직접 그린다(페이지별 검/흰). PageSurface는 PageFrame 테두리(1px)만큼 오프셋이 있어
             // VisualBrush로 쓰면 좌/상에 1px 투명 여백이 생기므로, 그리드 원점(0,0)에 있는 PanelCanvas를 렌더한다.
-            var background = BlackBackgroundCheckBox?.IsChecked == true ? Brushes.Black : Brushes.White;
+            var background = new SolidColorBrush(CurrentPageBackgroundColor());
             context.DrawRectangle(background, null, pageRect);
 
             // 콘텐츠(칸). PanelCanvas는 PageOverlay(선택 UI)와 분리돼 있어 핸들/선택박스가 자동 제외된다.

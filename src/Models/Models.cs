@@ -78,10 +78,14 @@ public sealed class ComicPanel : System.ComponentModel.INotifyPropertyChanged
     public List<SpeechBubble> Bubbles { get; } = new();
     public bool IsLocked { get; set; }
 
-    // 칸 모양(사변형). 기본 모서리 변위 0 = 직사각형. QuadFill=흰 배경, QuadBorder=검은 외곽선.
+    // 칸 모양(사변형). 기본 모서리 변위 0 = 직사각형. QuadFill=배경, QuadBorder=외곽선.
     public System.Windows.Shapes.Path QuadFill { get; set; } = null!;
     // 칸 테두리(변마다 두께 보정). 인덱스 0=상,1=우,2=하,3=좌.
     public System.Windows.Shapes.Line[] QuadBorderLines { get; set; } = System.Array.Empty<System.Windows.Shapes.Line>();
+    // 칸 테두리색(기본 검정).
+    public Color BorderColor { get; set; } = Colors.Black;
+    // 말풍선 외곽선을 테두리색별로 합쳐 그린 동적 경로들(색이 다른 말풍선은 따로 그린다).
+    public List<System.Windows.Shapes.Path> DynamicBubbleOutlines { get; } = new();
     // 크롭 OFF(넘치는) 이미지는 테두리보다 앞에 그리기 위해 별도 캔버스(테두리 위)에 둔다.
     public Canvas FreeImageCanvas { get; set; } = null!;
     public bool CornerMode { get; set; }
@@ -143,6 +147,17 @@ public sealed class PanelImage
     // 칸 리사이즈 시 따라갈 기준점(0~1). X: 0=좌, 1=우 / Y: 0=하, 1=상. 기본 (0,1)=좌상단 고정.
     public double PivotX { get; set; }
     public double PivotY { get; set; } = 1;
+
+    // 가장자리 그라데이션. 선택한 방향 변이 '대상 색'으로, 반대편은 원본 이미지로 보간된다.
+    // 대상 색의 알파가 0(투명)이면 색을 칠하는 대신 이미지가 점점 사라진다(페이지가 비침). None이면 효과 없음.
+    public ImageGradientDirection GradientDirection { get; set; } = ImageGradientDirection.None;
+    public Color GradientColor { get; set; } = Color.FromArgb(0, 255, 255, 255); // 기본 투명(=사라짐)
+    // 페이드 구간(%): 대상(방향) 변(0%)에서 GradientStart까지 완전 대상색,
+    // GradientEnd 이후 완전 원본. 그 사이 선형 보간.
+    public double GradientStart { get; set; } = 40;
+    public double GradientEnd { get; set; } = 60;
+    // 색 모드일 때 이미지 위에 칠하는 오버레이(이미지 모양 마스크 적용). 콘텐츠와 같은 변환 공유.
+    public Border? GradientOverlay { get; set; }
 
     // 픽셀 알파 히트테스트용 BGRA 변환본 캐시. Key가 현재 소스와 같으면 Value를 재사용한다
     // (애니메이션/동영상 프레임 교체 시 소스 참조가 바뀌면 자동으로 다시 만든다).
@@ -217,6 +232,8 @@ public sealed class SpeechBubble
     public double ShapeWidthVariation { get; set; }
     // 말풍선 배경색(채움). 기본 흰색.
     public Brush BackgroundBrush { get; set; } = Brushes.White;
+    // 말풍선 테두리(외곽선) 색. 기본 검정.
+    public Color BorderColor { get; set; } = Colors.Black;
     // 선 호스트(집중선/속도선)를 마지막으로 만들 때의 파라미터 서명. 위치만 바뀐 경우 재생성을 건너뛴다.
     public string? LineHostSignature { get; set; }
     public List<BubbleTail> Tails { get; } = new();
@@ -415,6 +432,16 @@ public enum BubbleShape
     ConcentrationLines,
     EffectLines,
     None
+}
+
+// 이미지 투명도 그라데이션 방향(선택한 변이 투명해진다).
+public enum ImageGradientDirection
+{
+    None,
+    Top,
+    Bottom,
+    Left,
+    Right
 }
 
 public enum SelectionKind

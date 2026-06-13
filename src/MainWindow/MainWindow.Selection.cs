@@ -28,6 +28,7 @@ public partial class MainWindow : Window
         // 단일 선택: 칸만 선택하고 이미지·말풍선 선택은 해제한다.
         _selectionKind = SelectionKind.Panel;
         _selectedPanel = panel;
+        panel.Frame.Visibility = Visibility.Visible; // 화면 밖에서 컬링됐어도 선택 시 보이게.
         _selectedImage = null;
         _selectedBubble = null;
         _selectedBubbleTail = null;
@@ -35,6 +36,8 @@ public partial class MainWindow : Window
         _isLoadingInspector = true;
         PanelLockCheckBox.IsChecked = panel.IsLocked;
         PanelCornerModeCheckBox.IsChecked = panel.CornerMode;
+        SelectBubbleColorInCombo(PanelBackgroundColorComboBox, panel.QuadFill.Fill);
+        SelectBubbleColorInCombo(PanelBorderColorComboBox, new SolidColorBrush(panel.BorderColor));
         _isLoadingInspector = false;
         UpdateImageList(panel);
         UpdateBubbleList(panel);
@@ -104,6 +107,20 @@ public partial class MainWindow : Window
         ImageLockCheckBox.IsChecked = image.IsLocked;
         ImagePivotXBox.Text = $"{image.PivotX:0.##}";
         ImagePivotYBox.Text = $"{image.PivotY:0.##}";
+        ImageGradientComboBox.SelectedIndex = image.GradientDirection switch
+        {
+            ImageGradientDirection.Top => 1,
+            ImageGradientDirection.Bottom => 2,
+            ImageGradientDirection.Left => 3,
+            ImageGradientDirection.Right => 4,
+            _ => 0
+        };
+        SelectBubbleColorInCombo(ImageGradientColorComboBox, new SolidColorBrush(image.GradientColor));
+        ImageGradientStartSlider.Value = Math.Clamp(image.GradientStart, 0, 100);
+        ImageGradientEndSlider.Value = Math.Clamp(image.GradientEnd, 0, 100);
+        ImageGradientStartText.Text = $"시작: {ImageGradientStartSlider.Value:0}%";
+        ImageGradientEndText.Text = $"끝: {ImageGradientEndSlider.Value:0}%";
+        UpdateImageGradientControls();
         _isLoadingInspector = false;
         UpdateSelectionLabels();
         UpdateSelectionVisuals();
@@ -153,6 +170,7 @@ public partial class MainWindow : Window
         SelectBubbleColorInCombo(BubbleFillColorComboBox, bubble.TextBlock.Fill);
         SelectBubbleColorInCombo(BubbleStrokeColorComboBox, bubble.TextBlock.Stroke); // 투명이면 '없음'
         SelectBubbleColorInCombo(BubbleBackgroundColorComboBox, bubble.BackgroundBrush);
+        SelectBubbleColorInCombo(BubbleBorderColorComboBox, new SolidColorBrush(bubble.BorderColor));
         // 돌기 최대값은 모양에 따라 다르므로(파도/외침·플래시=1000) 값 클램프 전에 먼저 맞춘다.
         BubbleShapeCountSlider.Maximum = bubble.Shape == BubbleShape.Flash ? 1000 : 100;
         BubbleShapeCountSlider.Value = Math.Clamp(bubble.ShapeCount, BubbleShapeCountSlider.Minimum, BubbleShapeCountSlider.Maximum);
@@ -179,6 +197,7 @@ public partial class MainWindow : Window
         BubbleWidthSlider.Value = bubble.Container.Width;
         BubbleHeightSlider.Value = bubble.Container.Height;
         BubbleFontBox.Text = $"{bubble.MaxFontSize:0}";
+        SelectBubbleFontInCombo(bubble.TextBlock.FontFamily?.Source ?? "Malgun Gothic");
         BubbleXSlider.Value = Math.Clamp(position.X, BubbleXSlider.Minimum, BubbleXSlider.Maximum);
         BubbleYSlider.Value = Math.Clamp(position.Y, BubbleYSlider.Minimum, BubbleYSlider.Maximum);
         _isLoadingInspector = false;

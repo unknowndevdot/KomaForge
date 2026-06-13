@@ -88,7 +88,7 @@ public partial class MainWindow : Window
         var captured = CaptureCurrentPage(page.Name);
         page.PageWidth = captured.PageWidth;
         page.PageHeight = captured.PageHeight;
-        page.BlackBackground = captured.BlackBackground;
+        page.BackgroundColor = captured.BackgroundColor;
         page.Panels = captured.Panels;
     }
 
@@ -99,7 +99,7 @@ public partial class MainWindow : Window
             Name = name,
             PageWidth = _pageWidth,
             PageHeight = _pageHeight,
-            BlackBackground = BlackBackgroundCheckBox?.IsChecked == true
+            BackgroundColor = ColorToHex(CurrentPageBackgroundColor())
         };
 
         foreach (var panel in _panels)
@@ -123,7 +123,11 @@ public partial class MainWindow : Window
         IsCropped = image.IsCropped,
         IsLocked = image.IsLocked,
         PivotX = image.PivotX,
-        PivotY = image.PivotY
+        PivotY = image.PivotY,
+        GradientDirection = image.GradientDirection.ToString(),
+        GradientColor = ColorToHex(image.GradientColor),
+        GradientStart = image.GradientStart,
+        GradientEnd = image.GradientEnd
     };
 
     private SpeechBubbleData CaptureBubbleData(SpeechBubble bubble)
@@ -138,6 +142,7 @@ public partial class MainWindow : Window
             Width = bubble.Container.Width,
             Height = bubble.Container.Height,
             FontSize = bubble.MaxFontSize,
+            FontFamily = bubble.TextBlock.FontFamily?.Source ?? string.Empty,
             TextMarginLeft = bubble.TextBlock.Margin.Left,
             TextMarginTop = bubble.TextBlock.Margin.Top,
             TextMarginRight = bubble.TextBlock.Margin.Right,
@@ -149,6 +154,7 @@ public partial class MainWindow : Window
             FillColor = ToHex(bubble.TextBlock.Fill),
             StrokeColor = ToHex(bubble.TextBlock.Stroke),
             BackgroundColor = ToHex(bubble.BackgroundBrush),
+            BorderColor = ColorToHex(bubble.BorderColor),
             Shape = bubble.Shape.ToString(),
             ShapeCount = bubble.ShapeCount,
             ShapeStrength = bubble.ShapeStrength,
@@ -172,6 +178,17 @@ public partial class MainWindow : Window
         };
     }
 
+    // 칸 테두리색을 4개 변 선에 적용한다.
+    private static void SetPanelBorderColor(ComicPanel panel, Color color)
+    {
+        panel.BorderColor = color;
+        var brush = new SolidColorBrush(color);
+        foreach (var line in panel.QuadBorderLines)
+        {
+            line.Stroke = brush;
+        }
+    }
+
     private ComicPanelData CapturePanelData(ComicPanel panel)
     {
         var panelData = new ComicPanelData
@@ -185,6 +202,8 @@ public partial class MainWindow : Window
             Height = panel.Frame.Height,
             IsLocked = panel.IsLocked,
             CornerMode = panel.CornerMode,
+            BackgroundColor = ColorToHex((panel.QuadFill.Fill as SolidColorBrush)?.Color ?? Colors.White),
+            BorderColor = ColorToHex(panel.BorderColor),
             CornerOffsets = PanelOffsetsToArray(panel.CornerOffsets)
         };
 
@@ -240,7 +259,11 @@ public partial class MainWindow : Window
                         IsCropped = image.IsCropped,
                         IsLocked = image.IsLocked,
                         PivotX = image.PivotX,
-                        PivotY = image.PivotY
+                        PivotY = image.PivotY,
+                        GradientDirection = image.GradientDirection,
+                        GradientColor = image.GradientColor,
+                        GradientStart = image.GradientStart,
+                        GradientEnd = image.GradientEnd
                     });
                 }
 
@@ -259,12 +282,13 @@ public partial class MainWindow : Window
         _nextPanelNumber = 1;
         // 페이지마다 개별 크기를 적용한다(입력칸도 갱신).
         SetPageSize(page.PageWidth, page.PageHeight, true);
-        // 페이지별 배경색 적용.
-        if (BlackBackgroundCheckBox != null)
-        {
-            BlackBackgroundCheckBox.IsChecked = page.BlackBackground;
-        }
-
+        // 페이지별 배경색 적용. BackgroundColor가 비었으면 구버전 BlackBackground(검/흰)로 본다.
+        var pageBg = !string.IsNullOrEmpty(page.BackgroundColor)
+            ? page.BackgroundColor
+            : (page.BlackBackground ? "#000000" : "#FFFFFF");
+        _suppressColorCombo = true;
+        SelectBubbleColorInCombo(PageBackgroundColorComboBox, new SolidColorBrush(SafeColor(pageBg)));
+        _suppressColorCombo = false;
         ApplyPageBackground();
 
         foreach (var panelData in page.Panels)
@@ -278,6 +302,8 @@ public partial class MainWindow : Window
 
         UpdateLayoutSummary();
         UpdatePageIndicator();
+        // 레이아웃이 갱신된 뒤(스크롤 위치 반영) 현재 뷰포트 기준으로 컬링.
+        Dispatcher.BeginInvoke(new Action(CullOffscreenPanels), System.Windows.Threading.DispatcherPriority.Loaded);
     }
 
     // --- DTO로부터 런타임 오브젝트 생성(불러오기·붙여넣기 공용) ---
@@ -301,6 +327,11 @@ public partial class MainWindow : Window
         image.Translate.Y = imageData.TranslateY;
         image.PivotX = imageData.PivotX;
         image.PivotY = imageData.PivotY;
+        image.GradientDirection = ParseGradientDirection(imageData.GradientDirection);
+        image.GradientColor = SafeColor(imageData.GradientColor);
+        image.GradientStart = imageData.GradientStart;
+        image.GradientEnd = imageData.GradientEnd;
+        ApplyImageGradient(image);
         SetImageCrop(image, imageData.IsCropped);
         SetImageLocked(image, imageData.IsLocked);
         return image;
@@ -318,6 +349,9 @@ public partial class MainWindow : Window
             bubbleData.Y);
 
         if (!string.IsNullOrEmpty(bubbleData.Id)) bubble.Id = bubbleData.Id; // 저장/실행취소 ID 유지(붙여넣기는 새 ID).
+        // 글꼴 복원(구버전/미지정이면 기존 기본 글꼴).
+        bubble.TextBlock.FontFamily = new FontFamily(string.IsNullOrEmpty(bubbleData.FontFamily) ? "Malgun Gothic" : bubbleData.FontFamily);
+        bubble.BorderColor = SafeColor(string.IsNullOrEmpty(bubbleData.BorderColor) ? "#000000" : bubbleData.BorderColor);
         bubble.TextBlock.Margin = new Thickness(bubbleData.TextMarginLeft, bubbleData.TextMarginTop, bubbleData.TextMarginRight, bubbleData.TextMarginBottom);
 
         var (mappedShape, legacyStrength) = MapShape(bubbleData.Shape);
@@ -372,6 +406,8 @@ public partial class MainWindow : Window
             panelData.Height);
         if (!string.IsNullOrEmpty(panelData.Id)) panel.Id = panelData.Id; // 저장/실행취소 ID 유지(붙여넣기는 새 ID).
         panel.Name = panelData.Name ?? string.Empty;
+        panel.QuadFill.Fill = new SolidColorBrush(SafeColor(string.IsNullOrEmpty(panelData.BackgroundColor) ? "#FFFFFF" : panelData.BackgroundColor));
+        SetPanelBorderColor(panel, SafeColor(string.IsNullOrEmpty(panelData.BorderColor) ? "#000000" : panelData.BorderColor));
         AddPanel(panel);
 
         foreach (var imageData in panelData.Images)
@@ -461,6 +497,105 @@ public partial class MainWindow : Window
         PanelListBox.Items.Add(panel);
         UpdatePanelOrder();
         UpdateLayoutSummary();
+        CullOffscreenPanels();
+    }
+
+    // 뷰포트(±한 화면) 밖 칸을 Collapsed로 만들어, 긴 페이지에서도 렌더·레이아웃·히트테스트 비용을 일정하게 유지한다.
+    // 칸 한 개의 모든 콘텐츠가 Frame 하나에 들어 있어 Frame.Visibility만 토글하면 된다.
+    private void CullOffscreenPanels()
+    {
+        if (PageScrollViewer == null || PanelCanvas == null)
+        {
+            return;
+        }
+
+        // 드래그 중에는 레이아웃을 건드리지 않는다(드래그 대상이 사라지는 것 방지).
+        if (_isDraggingPanel || _isDraggingPanelImage || _isDraggingBubble)
+        {
+            return;
+        }
+
+        Rect visible;
+        try
+        {
+            var t = PageScrollViewer.TransformToDescendant(PanelCanvas);
+            var tl = t.Transform(new Point(0, 0));
+            var br = t.Transform(new Point(PageScrollViewer.ViewportWidth, PageScrollViewer.ViewportHeight));
+            visible = new Rect(tl, br);
+        }
+        catch
+        {
+            foreach (var p in _panels)
+            {
+                p.Frame.Visibility = Visibility.Visible;
+            }
+            return;
+        }
+
+        // 위/아래 한 화면만큼 여유를 둬 스크롤 시 빈 공간이 잠깐 보이는 것을 막는다.
+        var marginY = Math.Max(200, visible.Height);
+        var top = visible.Top - marginY;
+        var bottom = visible.Bottom + marginY;
+
+        foreach (var panel in _panels)
+        {
+            // 크롭 OFF 이미지·말풍선은 칸 밖으로 넘치므로, 프레임이 아니라 콘텐츠 전체 경계로 판정한다.
+            var cb = GetPanelCullBoundsPage(panel);
+            var onScreen = cb.Bottom >= top && cb.Top <= bottom;
+            // 선택된 칸/말풍선/이미지의 소속 칸은 화면 밖이라도 유지(리스트 선택·편집 중).
+            var selected = ReferenceEquals(panel, _selectedPanel)
+                || ReferenceEquals(panel, _selectedBubble?.OwnerPanel)
+                || ReferenceEquals(panel, _selectedImage?.OwnerPanel);
+            var target = onScreen || selected ? Visibility.Visible : Visibility.Collapsed;
+            if (panel.Frame.Visibility != target)
+            {
+                panel.Frame.Visibility = target;
+            }
+        }
+    }
+
+    // 칸의 페이지 좌표 경계(크롭 OFF 이미지·말풍선의 칸 밖 넘침 포함). 레이아웃에 의존하지 않고 트랜스폼/위치 데이터로 계산한다.
+    private Rect GetPanelCullBoundsPage(ComicPanel panel)
+    {
+        var fl = GetCanvasLeft(panel.Frame);
+        var ft = GetCanvasTop(panel.Frame);
+        if (double.IsNaN(fl)) fl = 0;
+        if (double.IsNaN(ft)) ft = 0;
+        var bounds = new Rect(fl, ft, panel.Frame.Width, panel.Frame.Height);
+
+        // 크롭 OFF 이미지: 칸 밖으로 넘치는 실제 표시 영역.
+        foreach (var img in panel.Images)
+        {
+            if (img.IsCropped)
+            {
+                continue; // 크롭 ON은 칸 사변형으로 클립되어 프레임 안.
+            }
+
+            bounds.Union(GetImageVisiblePageBounds(img));
+        }
+
+        // 크롭 OFF 말풍선: 컨테이너 + 꼬리 끝점까지.
+        foreach (var b in panel.Bubbles)
+        {
+            if (b.IsCropped)
+            {
+                continue;
+            }
+
+            var bx = fl + GetCanvasLeft(b.Container);
+            var by = ft + GetCanvasTop(b.Container);
+            if (double.IsNaN(bx)) bx = fl;
+            if (double.IsNaN(by)) by = ft;
+            bounds.Union(new Rect(bx, by, b.Container.Width, b.Container.Height));
+            foreach (var tail in b.Tails)
+            {
+                bounds.Union(new Point(bx + tail.StartX, by + tail.StartY));
+                bounds.Union(new Point(bx + tail.MidX, by + tail.MidY));
+                bounds.Union(new Point(bx + tail.X, by + tail.Y));
+            }
+        }
+
+        return bounds;
     }
 
     // 오브젝트(칸/이미지/말풍선)용 새 고유 ID. 실행취소/다시실행 후 같은 오브젝트를 다시 선택하는 데 쓴다.
@@ -530,7 +665,7 @@ public partial class MainWindow : Window
         // 칸 모양(사변형). 흰 배경 + 검은 외곽선을 직사각형 Border 대신 Path로 그린다(기본은 직사각형과 동일).
         var quadFill = new System.Windows.Shapes.Path
         {
-            Fill = Brushes.White,
+            Fill = new SolidColorBrush(Colors.White), // 칸 배경색(인스펙터에서 변경 가능). 기본 흰색.
             IsHitTestVisible = false
         };
         // 테두리는 변마다 두께를 다르게 줄 수 있도록 4개의 선으로 그린다(대각 변은 AA 번짐 보정을 위해 약간 얇게).
@@ -724,7 +859,7 @@ public partial class MainWindow : Window
         {
             Text = text,
             FontSize = fontSize,
-            FontFamily = new FontFamily("Malgun Gothic"),
+            FontFamily = new FontFamily(_lastBubbleFontFamily),
             FontWeight = FontWeights.SemiBold,
             TextWrapping = TextWrapping.Wrap,
             Fill = Brushes.Black,

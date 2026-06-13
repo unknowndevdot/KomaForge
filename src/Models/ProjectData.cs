@@ -29,7 +29,10 @@ public sealed class ComicPageData : System.ComponentModel.INotifyPropertyChanged
 
     public double PageWidth { get; set; } = 832;
     public double PageHeight { get; set; } = 1216;
+    // 구버전 호환: 옛 '페이지 배경 검은색' 플래그. 신버전은 BackgroundColor를 쓴다.
     public bool BlackBackground { get; set; }
+    // 페이지 배경색(#RRGGBB). 빈 값이면 구버전 BlackBackground로 판단(검/흰).
+    public string BackgroundColor { get; set; } = string.Empty;
     public List<ComicPanelData> Panels { get; set; } = new();
 
     public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
@@ -49,6 +52,10 @@ public sealed class ComicPanelData
     public double Height { get; set; }
     public bool IsLocked { get; set; }
     public bool CornerMode { get; set; }
+    // 칸 배경색(#RRGGBB 또는 #AARRGGBB). 미지정이면 흰색.
+    public string BackgroundColor { get; set; } = "#FFFFFF";
+    // 칸 테두리색. 미지정이면 검정.
+    public string BorderColor { get; set; } = "#000000";
     // 사변형 모서리 변위(TL,TR,BR,BL × X,Y) = 8개. 기본 0이면 직사각형.
     public double[] CornerOffsets { get; set; } = new double[8];
     public List<PanelImageData> Images { get; set; } = new();
@@ -68,6 +75,12 @@ public sealed class PanelImageData
     public bool IsLocked { get; set; }
     public double PivotX { get; set; }
     public double PivotY { get; set; } = 1;
+    // 가장자리 그라데이션(투명 포함). "None"/미지정이면 효과 없음.
+    public string GradientDirection { get; set; } = "None";
+    // 대상 색(#AARRGGBB 또는 #RRGGBB). 알파 0이면 투명(=이미지 사라짐).
+    public string GradientColor { get; set; } = "#00FFFFFF";
+    public double GradientStart { get; set; } = 40;
+    public double GradientEnd { get; set; } = 60;
 }
 
 public sealed class SpeechBubbleData
@@ -79,6 +92,8 @@ public sealed class SpeechBubbleData
     public double Width { get; set; } = 170;
     public double Height { get; set; } = 100;
     public double FontSize { get; set; } = 18;
+    // 글꼴 이름(시스템 글꼴). 빈 값이면 기본 글꼴.
+    public string FontFamily { get; set; } = string.Empty;
     public double TextMarginLeft { get; set; } = 16;
     public double TextMarginTop { get; set; } = 12;
     public double TextMarginRight { get; set; } = 16;
@@ -89,6 +104,8 @@ public sealed class SpeechBubbleData
     public string FillColor { get; set; } = "#000000";
     public string StrokeColor { get; set; } = "#FFFFFF";
     public string BackgroundColor { get; set; } = "#FFFFFF";
+    // 말풍선 테두리(외곽선) 색. 미지정이면 검정.
+    public string BorderColor { get; set; } = "#000000";
     public string Shape { get; set; } = nameof(BubbleShape.RoundRect);
     public int ShapeCount { get; set; } = 9;
     public double ShapeStrength { get; set; }
@@ -126,6 +143,7 @@ public sealed class WindowSettings
     public string WindowState { get; set; } = "Normal";
     // 프로젝트와 무관한 앱 설정(다음 실행 시 복원).
     public bool PageFit { get; set; }
+    public bool PageWidthFit { get; set; }
     public string LayoutPattern { get; set; } = "1,2,1";
     public string AutoMargin { get; set; } = "24";
     public string AutoGutter { get; set; } = "14";

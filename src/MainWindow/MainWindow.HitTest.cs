@@ -395,6 +395,7 @@ public partial class MainWindow : Window
             AutoGutterTextBox.Text = settings.AutoGutter ?? "14";
             SetBubbleShapeByTag(settings.BubbleShape ?? "Oval");
             PageFitMenuItem.IsChecked = settings.PageFit;
+            PageWidthFitMenuItem.IsChecked = settings.PageWidthFit;
             SetInspectorVisible(settings.InspectorVisible);
             _selectionPreviewEnabled = settings.SelectionPreview;
             _keepAspectRatio = settings.KeepAspectRatio;
@@ -457,6 +458,7 @@ public partial class MainWindow : Window
                 Top = bounds.Top,
                 WindowState = maximized ? "Maximized" : "Normal",
                 PageFit = PageFitMenuItem.IsChecked,
+                PageWidthFit = PageWidthFitMenuItem.IsChecked,
                 LayoutPattern = LayoutPatternTextBox.Text,
                 AutoMargin = AutoMarginTextBox.Text,
                 AutoGutter = AutoGutterTextBox.Text,
