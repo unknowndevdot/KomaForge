@@ -7,6 +7,13 @@
     <UseWPF>true</UseWPF>
     <ApplicationIcon />
     <Version>0.1.0</Version>
+    <Product>KomaForge</Product>
+    <Description>망가 페이지 에디터</Description>
+    <Authors>unknowndevdot</Authors>
+    <Company>unknowndevdot</Company>
+    <Copyright>Copyright © 2026 unknowndevdot</Copyright>
+    <RepositoryUrl>https://github.com/unknowndevdot/KomaForge</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="SkiaSharp" Version="2.88.8" />
