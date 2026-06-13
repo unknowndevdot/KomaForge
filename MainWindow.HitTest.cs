@@ -16,20 +16,26 @@ namespace KomaForge;
 
 public partial class MainWindow : Window
 {
+    // 칸 선택 히트 영역을 프레임보다 바깥으로 조금 넓힌다(테두리를 노리다 살짝 빗나가도 칸이 선택되게).
+    private const double PanelOutwardHitMargin = 8;
+
     private static bool IsOnPanelBorder(ComicPanel panel, Point point)
     {
         const double borderHitSize = 18;
+        const double outward = PanelOutwardHitMargin;
         var width = panel.Frame.ActualWidth;
         var height = panel.Frame.ActualHeight;
 
-        // 프레임 밖(예: 칸을 넘어 튀어나온 크롭 OFF 이미지 영역)은 테두리가 아니다.
-        // 이렇게 해야 넘친 이미지 위 클릭이 칸 테두리로 오인되지 않고 이미지 드래그로 처리된다.
-        if (point.X < 0 || point.Y < 0 || point.X > width || point.Y > height)
+        // 프레임 바깥이라도 outward 이내면 테두리로 인정한다. 그보다 더 밖이면 테두리가 아니다
+        // (넘친 이미지 위 클릭이 칸 테두리로 오인되지 않도록 범위를 제한).
+        if (point.X < -outward || point.Y < -outward || point.X > width + outward || point.Y > height + outward)
         {
             return false;
         }
 
-        return point.X <= borderHitSize ||
+        // 프레임 밖(바깥 밴드)이거나 안쪽 테두리 밴드이면 테두리로 본다.
+        return point.X < 0 || point.Y < 0 || point.X > width || point.Y > height ||
+               point.X <= borderHitSize ||
                point.Y <= borderHitSize ||
                point.X >= width - borderHitSize ||
                point.Y >= height - borderHitSize;
@@ -351,12 +357,16 @@ public partial class MainWindow : Window
     {
         try
         {
-            if (!File.Exists(_windowSettingsPath))
+            // 새 이름이 있으면 그것을, 없으면 구버전 파일(window-settings.json)을 불러온다.
+            var path = File.Exists(_windowSettingsPath)
+                ? _windowSettingsPath
+                : (File.Exists(_legacyWindowSettingsPath) ? _legacyWindowSettingsPath : null);
+            if (path == null)
             {
                 return;
             }
 
-            var json = File.ReadAllText(_windowSettingsPath);
+            var json = File.ReadAllText(path);
             var settings = JsonSerializer.Deserialize<WindowSettings>(json);
             if (settings == null)
             {
@@ -366,11 +376,17 @@ public partial class MainWindow : Window
             Width = Math.Max(MinWidth, settings.Width);
             Height = Math.Max(MinHeight, settings.Height);
 
-            if (settings.Left >= 0 && settings.Top >= 0)
+            // 저장된 영역이 화면에 충분히 보이면 그 위치로 복원(스냅된 위치·다중 모니터·음수 좌표 지원).
+            if (IsRectMostlyOnScreen(settings.Left, settings.Top, settings.Width, settings.Height))
             {
                 WindowStartupLocation = WindowStartupLocation.Manual;
                 Left = settings.Left;
                 Top = settings.Top;
+            }
+
+            if (string.Equals(settings.WindowState, "Maximized", StringComparison.OrdinalIgnoreCase))
+            {
+                WindowState = WindowState.Maximized;
             }
 
             // 앱 설정 복원
@@ -380,11 +396,32 @@ public partial class MainWindow : Window
             SetBubbleShapeByTag(settings.BubbleShape ?? "Oval");
             PageFitMenuItem.IsChecked = settings.PageFit;
             SetInspectorVisible(settings.InspectorVisible);
+            _selectionPreviewEnabled = settings.SelectionPreview;
+            _keepAspectRatio = settings.KeepAspectRatio;
+            _recentColors.Clear();
+            if (settings.RecentColors != null)
+            {
+                _recentColors.AddRange(settings.RecentColors);
+            }
+            ImportShortcuts(settings.Shortcuts);
         }
         catch
         {
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
         }
+    }
+
+    // 저장된 창 영역이 (다중 모니터 포함) 화면 안에 충분히 보이는지 — 완전히 화면 밖이면 복원하지 않는다.
+    private static bool IsRectMostlyOnScreen(double left, double top, double width, double height)
+    {
+        var screen = new Rect(
+            SystemParameters.VirtualScreenLeft,
+            SystemParameters.VirtualScreenTop,
+            SystemParameters.VirtualScreenWidth,
+            SystemParameters.VirtualScreenHeight);
+        var win = new Rect(left, top, Math.Max(1, width), Math.Max(1, height));
+        win.Intersect(screen);
+        return win.Width >= 80 && win.Height >= 80;
     }
 
     private void SetBubbleShapeByTag(string tag)
@@ -404,18 +441,31 @@ public partial class MainWindow : Window
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_windowSettingsPath)!);
+
+            // 최대화는 RestoreBounds(복원 크기)를, 그 외(스냅 포함 일반 상태)는 실제 화면 영역을 저장한다.
+            // RestoreBounds는 스냅된 실제 크기가 아니라 '스냅 해제 시 크기'라서 스냅 보존에는 쓰지 않는다.
+            var maximized = WindowState == System.Windows.WindowState.Maximized;
+            var bounds = maximized || double.IsNaN(Left) || double.IsNaN(Top)
+                ? RestoreBounds
+                : new Rect(Left, Top, ActualWidth, ActualHeight);
+
             var settings = new WindowSettings
             {
-                Width = RestoreBounds.Width,
-                Height = RestoreBounds.Height,
-                Left = RestoreBounds.Left,
-                Top = RestoreBounds.Top,
+                Width = bounds.Width,
+                Height = bounds.Height,
+                Left = bounds.Left,
+                Top = bounds.Top,
+                WindowState = maximized ? "Maximized" : "Normal",
                 PageFit = PageFitMenuItem.IsChecked,
                 LayoutPattern = LayoutPatternTextBox.Text,
                 AutoMargin = AutoMarginTextBox.Text,
                 AutoGutter = AutoGutterTextBox.Text,
                 BubbleShape = (BubbleShapeComboBox.SelectedItem as ComboBoxItem)?.Tag as string ?? "Oval",
-                InspectorVisible = InspectorPanel.Visibility == Visibility.Visible
+                InspectorVisible = InspectorPanel.Visibility == Visibility.Visible,
+                SelectionPreview = _selectionPreviewEnabled,
+                KeepAspectRatio = _keepAspectRatio,
+                RecentColors = new List<string>(_recentColors),
+                Shortcuts = ExportShortcuts()
             };
             var json = JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true });
             File.WriteAllText(_windowSettingsPath, json);

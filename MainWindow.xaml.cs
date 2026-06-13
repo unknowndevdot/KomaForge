@@ -16,8 +16,8 @@ namespace KomaForge;
 
 public partial class MainWindow : Window
 {
-    private double _pageWidth = 820;
-    private double _pageHeight = 1120;
+    private double _pageWidth = 832;
+    private double _pageHeight = 1216;
     private double _inspectorWidth = 360; // 드래그로 조절한 인스펙터 폭(토글 복원용).
     // 마우스 호버 시 '클릭하면 선택될 대상'을 보여주는 작은 툴팁.
     private System.Windows.Controls.Primitives.Popup? _hoverPopup;
@@ -42,9 +42,18 @@ public partial class MainWindow : Window
     private bool _isUpdatingPanelList;
     private Point _dragStart;
     private Point _imageDragStart;
+    // 이미지 드래그 시작 시점의 Translate(절대 위치 계산용 — 스냅 누적 드리프트 방지).
+    private Point _imageDragOrigin;
     private bool _isDraggingPanel;
     private bool _isDraggingPanelImage;
     private bool _isDraggingBubble;
+    // 마우스 다운 시점에 선택하지 않고, (드래그 없이) 업할 때 선택할 대상(칸/이미지/말풍선). 드래그·휠은 이미 선택된 것만.
+    private object? _pendingSelect;
+    // 이미 선택된(겹친) 오브젝트를 다시 클릭했을 때, (드래그 없이) 업하면 선택할 '한 단계 안쪽' 대상.
+    private object? _pendingCycle;
+    // 보류 선택의 다운 위치(PageOverlay 좌표). 업 전에 이 거리 이상 움직이면 클릭이 아니라고 보고 선택을 취소한다.
+    private Point _pendingDownPos;
+    private const double PendingMoveCancelThreshold = 6;
     private bool _isLoadingInspector;
     private bool _isUpdatingBubbleList;
     private bool _isUpdatingBubbleTailList;
@@ -61,9 +70,22 @@ public partial class MainWindow : Window
     private Thumb? _tailStartHandle;
     private Thumb? _tailMidHandle;
     private Thumb? _tailEndHandle;
-    // 말풍선 선택 박스/리사이즈 핸들도 칸 경계에 잘리지 않도록 PageOverlay에 싱글톤으로 둔다.
+    // 말풍선 선택 박스도 칸 경계에 잘리지 않도록 PageOverlay에 싱글톤으로 둔다.
+    // (8방향 리사이즈 핸들은 MainWindow.Resize.cs의 _bubbleResizeHandles가 담당한다.)
     private Border? _bubbleSelectionBox;
-    private Thumb? _bubbleResizeHandle;
+    // 칸 선택 박스도 칸 경계에 잘리지 않도록 PageOverlay에 싱글톤으로 둔다(칸 자체 테두리와 별개).
+    private Border? _panelSelectionBox;
+    // 이미지 선택 테두리 박스(핸들 없음). PageOverlay 싱글톤이라 칸 밖으로 나가도 안 잘린다.
+    private Border? _imageSelectionBox;
+    // 이동 시 스냅 가이드 선(세로=X 스냅, 가로=Y 스냅). PageOverlay 싱글톤.
+    private System.Windows.Shapes.Line? _snapGuideX;
+    private System.Windows.Shapes.Line? _snapGuideY;
+    // 호버 강조: 커서를 올렸을 때 '클릭하면 선택될' 오브젝트를 미리 강조한다.
+    private Border? _hoverBox;          // 호버 강조용 싱글톤 박스(말풍선·이미지 공용, PageOverlay).
+    private object? _hoveredObject;     // 현재 호버 강조 중인 오브젝트(칸/이미지/말풍선).
+    private bool _selectionPreviewEnabled; // '선택 미리보기 강조' ON/OFF(환경설정-일반). 기본 OFF.
+    private bool _keepAspectRatio = true;   // '이미지 크기 조절 시 비율 유지' ON/OFF(환경설정-일반). 기본 ON. 이미지에만 적용.
+    private double _resizeStartAspect = 1;  // 리사이즈 시작 시점의 가로/세로 비율(비율 유지 기준).
     // 텍스트 영역(여백)을 직접 조절하는 4모서리 핸들(싱글톤, PageOverlay).
     private Thumb? _textRegionTopLeft;
     private Thumb? _textRegionTopRight;
@@ -71,11 +93,18 @@ public partial class MainWindow : Window
     private Thumb? _textRegionBottomRight;
     // 칸 사변형 모서리 조절 핸들(싱글톤, PageOverlay). 인덱스 0=TL,1=TR,2=BR,3=BL.
     private Thumb[]? _panelCornerHandles;
-    // 포터블: 설정·자동저장을 실행 파일과 같은 폴더에 둔다(단일 파일 게시에서도 exe 폴더를 가리킴).
+    // 앱 설정(창 크기·단축키 등)은 사용자 폴더(%AppData%\KomaForge)에 저장한다.
     private readonly string _windowSettingsPath = Path.Combine(
-        AppContext.BaseDirectory,
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "KomaForge",
+        "komaforge-settings.json");
+    // 구버전 설정 파일명(없으면 무시). 새 이름이 없을 때 한 번 이 파일에서 불러온다.
+    private readonly string _legacyWindowSettingsPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "KomaForge",
         "window-settings.json");
     // 작업 내용 자동 저장(다음 실행 시 자동 복원). 명시적 저장/불러오기와는 별개.
+    // 이미지 상대 경로 포터블성을 위해 실행 파일과 같은 폴더에 둔다(설정과 다름).
     private readonly string _autosavePath = Path.Combine(
         AppContext.BaseDirectory,
         "autosave.kfjson");
@@ -87,10 +116,10 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        InitShortcuts();          // 기본 단축키 채우기(LoadWindowSettings에서 사용자 지정으로 덮어쓸 수 있음)
         LoadWindowSettings();
-        PopulateColorCombo(BubbleFillColorComboBox, "#000000");
-        PopulateColorCombo(BubbleStrokeColorComboBox, "#FFFFFF");
-        PopulateColorCombo(BubbleBackgroundColorComboBox, "#FFFFFF");
+        RefreshShortcutMenuText(); // 메뉴의 단축키 표기를 현재 설정으로 맞춘다
+        InitColorCombos(); // 팔레트 + 최근색 + '직접 지정…' 으로 색 콤보 구성(LoadWindowSettings 이후라 최근색 반영).
         Closing += (_, _) =>
         {
             SaveWindowSettings();
@@ -148,86 +177,35 @@ public partial class MainWindow : Window
             UpdateHoverTooltip(Mouse.DirectlyOver as DependencyObject);
         }
 
-        if ((Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control)
+        // 사용자 지정 가능한 명령 단축키(불러오기/저장/실행취소·다시실행/잘라내기·복사·붙여넣기/리셋/잠금).
+        if (TryRunCustomShortcut(e))
         {
-            var shift = (Keyboard.Modifiers & ModifierKeys.Shift) == ModifierKeys.Shift;
-            if (e.Key == Key.Z && !shift)
-            {
-                Undo();
-                e.Handled = true;
-                return;
-            }
-
-            if (e.Key == Key.Y || (e.Key == Key.Z && shift))
-            {
-                Redo();
-                e.Handled = true;
-                return;
-            }
-
-            // Ctrl+S: 현재 파일에 덮어쓰기 저장(경로 없으면 다른 이름으로 저장).
-            if (e.Key == Key.S)
-            {
-                SaveProjectToCurrentOrPrompt();
-                e.Handled = true;
-                return;
-            }
-
-            // Ctrl+O: 프로젝트 불러오기.
-            if (e.Key == Key.O)
-            {
-                LoadProject_Click(this, new RoutedEventArgs());
-                e.Handled = true;
-                return;
-            }
-
-            // Ctrl+R: 선택 대상 리셋(이미지=100% 원본, 칸=기본 사각형).
-            if (e.Key == Key.R)
-            {
-                ResetSelectedToDefault();
-                e.Handled = true;
-                return;
-            }
-
-            // Ctrl+X/C/V: 칸·이미지·말풍선 잘라내기/복사/붙여넣기.
-            // 텍스트 입력 중에는 기본 텍스트 편집(잘라내기/복사/붙여넣기)에 양보한다.
-            if ((e.Key == Key.X || e.Key == Key.C || e.Key == Key.V) && Keyboard.FocusedElement is not TextBox)
-            {
-                if (e.Key == Key.X)
-                {
-                    CutSelection();
-                }
-                else if (e.Key == Key.C)
-                {
-                    CopySelection();
-                }
-                else
-                {
-                    PasteClipboard();
-                }
-
-                e.Handled = true;
-                return;
-            }
+            e.Handled = true;
+            return;
         }
 
-        // L: 선택 오브젝트 잠금 토글.
-        // 텍스트 입력 중이거나 수정자 키(Ctrl/Alt)와 함께일 때는 단축키로 동작하지 않는다.
-        if (e.Key == Key.L &&
-            (Keyboard.Modifiers & (ModifierKeys.Control | ModifierKeys.Alt)) == 0)
+        // F2: 페이지 섹션에 포커스가 있고 선택된 페이지가 있으면 이름 인라인 편집 시작.
+        if (e.Key == Key.F2)
         {
-            if (Keyboard.FocusedElement is TextBox)
+            if (Keyboard.FocusedElement is not TextBox &&
+                PageSectionBorder != null && PageSectionBorder.IsKeyboardFocusWithin &&
+                PageListBox.SelectedIndex >= 0)
             {
-                return; // 글자 입력으로 둔다.
+                StartPageRename(PageListBox.SelectedIndex);
+                e.Handled = true;
             }
-
-            ToggleSelectedLock();
-            e.Handled = true;
             return;
         }
 
         if (e.Key == Key.Escape)
         {
+            // 페이지/칸 이름 편집 중이면 그 입력칸의 취소(KeyDown)에 맡긴다(선택 해제하지 않음).
+            if (Keyboard.FocusedElement is TextBox &&
+                (_pages.Exists(p => p.IsEditing) || _panels.Any(p => p.IsEditing)))
+            {
+                return;
+            }
+
             ClearSelection();
             e.Handled = true;
             return;
@@ -268,36 +246,49 @@ public partial class MainWindow : Window
                 return;
             }
 
-            var direction = e.Key == Key.Up ? -1 : 1;
-
             // 인스펙터가 닫혀 있으면 위/아래 키로 페이지를 넘긴다(선택 상태와 무관).
+            // (오브젝트 순서 이동은 인스펙터의 위로/아래로 버튼으로만 한다 — 키보드 단축키는 제거.)
             if (!IsInspectorOpen())
             {
-                NavigatePage(direction);
+                NavigatePage(e.Key == Key.Up ? -1 : 1);
                 e.Handled = true;
-                return;
-            }
-
-            // 인스펙터가 열려 있으면 선택 대상의 순서를 위/아래로 옮긴다.
-            switch (_selectionKind)
-            {
-                case SelectionKind.Bubble when _selectedBubble != null:
-                    MoveSelectedBubble(direction);
-                    e.Handled = true;
-                    return;
-                case SelectionKind.Image when _selectedImage != null:
-                    MoveSelectedImage(direction);
-                    e.Handled = true;
-                    return;
-                case SelectionKind.Panel when _selectedPanel != null:
-                    MoveSelectedPanel(direction);
-                    e.Handled = true;
-                    return;
             }
         }
     }
 
     private bool IsInspectorOpen() => InspectorPanel.Visibility == Visibility.Visible;
+
+    // 페이지 섹션(리스트·옵션) 안에 키보드 포커스가 있을 때만 하위 옵션을 보이고,
+    // 다른 섹션(칸/이미지/말풍선)과 동일하게 배경색도 강조한다.
+    private void PageSection_FocusChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        if (PageSectionBorder == null)
+        {
+            return;
+        }
+
+        var focused = PageSectionBorder.IsKeyboardFocusWithin;
+
+        // 페이지에 포커스가 들어오면 오브젝트 선택을 해제해, 칸+페이지가 동시에 선택돼 보이는 일을 막는다.
+        if (focused && _selectionKind != SelectionKind.None)
+        {
+            ClearSelection(announce: false);
+        }
+
+        SetPageSelected(focused);
+    }
+
+    // 페이지 섹션의 강조(배경색)와 하위 옵션 표시를 함께 토글한다.
+    private void SetPageSelected(bool selected)
+    {
+        if (PageEditControls == null || PageSectionBorder == null)
+        {
+            return;
+        }
+
+        PageEditControls.Visibility = selected ? Visibility.Visible : Visibility.Collapsed;
+        SetSectionHighlight(PageSectionBorder, selected);
+    }
 
     private void ApplyLayout_Click(object sender, RoutedEventArgs e)
     {
@@ -315,6 +306,166 @@ public partial class MainWindow : Window
         _currentPageIndex = PageListBox.SelectedIndex;
         LoadPage(_pages[_currentPageIndex]);
         UpdateStatus($"{_pages[_currentPageIndex].Name} 페이지를 열었습니다.");
+    }
+
+    // --- 페이지 이름 인라인 편집(더블클릭 / F2) ---
+
+    private string _pageNameBeforeEdit = "";
+
+    private void PageListBox_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        StartPageRename(PageListBox.SelectedIndex);
+    }
+
+    private void PageListBox_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key == System.Windows.Input.Key.F2)
+        {
+            StartPageRename(PageListBox.SelectedIndex);
+            e.Handled = true;
+        }
+    }
+
+    private void StartPageRename(int index)
+    {
+        if (index < 0 || index >= _pages.Count)
+        {
+            return;
+        }
+
+        foreach (var p in _pages)
+        {
+            p.IsEditing = false;
+        }
+
+        _pageNameBeforeEdit = _pages[index].Name;
+        _pages[index].IsEditing = true; // DataTrigger가 입력칸을 표시 → IsVisibleChanged에서 포커스.
+    }
+
+    private void PageRenameBox_IsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        if (sender is TextBox tb && tb.IsVisible)
+        {
+            // 모든 클릭/선택 처리가 끝난 뒤(Background) 포커스를 잡아, 리스트가 포커스를 도로 가져가
+            // 즉시 LostFocus로 닫히는 것을 막는다.
+            tb.Dispatcher.BeginInvoke(
+                new Action(() =>
+                {
+                    tb.Focus();
+                    Keyboard.Focus(tb);
+                    tb.SelectAll();
+                }),
+                System.Windows.Threading.DispatcherPriority.Background);
+        }
+    }
+
+    private void PageRenameBox_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (sender is not TextBox tb || tb.DataContext is not ComicPageData page)
+        {
+            return;
+        }
+
+        if (e.Key == System.Windows.Input.Key.Enter)
+        {
+            CommitPageRename(page);
+            e.Handled = true;
+        }
+        else if (e.Key == System.Windows.Input.Key.Escape)
+        {
+            page.Name = _pageNameBeforeEdit; // 되돌리기
+            page.IsEditing = false;
+            e.Handled = true;
+        }
+    }
+
+    private void PageRenameBox_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (sender is TextBox tb && tb.DataContext is ComicPageData page && page.IsEditing)
+        {
+            CommitPageRename(page);
+        }
+    }
+
+    private void CommitPageRename(ComicPageData page)
+    {
+        if (string.IsNullOrWhiteSpace(page.Name))
+        {
+            page.Name = string.IsNullOrWhiteSpace(_pageNameBeforeEdit) ? "Page" : _pageNameBeforeEdit;
+        }
+
+        page.IsEditing = false;
+        _historyDirty = true; // 이름 변경은 문서 변경으로 기록.
+    }
+
+    // --- 칸 이름 인라인 편집(더블클릭 / F2). 빈 이름으로 확정하면 기본 "N번 칸" 표시로 돌아간다. ---
+
+    private string _panelNameBeforeEdit = "";
+
+    private void PanelListBox_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        StartPanelRename(PanelListBox.SelectedItem as ComicPanel);
+    }
+
+    private void PanelListBox_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key == System.Windows.Input.Key.F2)
+        {
+            StartPanelRename(PanelListBox.SelectedItem as ComicPanel);
+            e.Handled = true;
+        }
+    }
+
+    private void StartPanelRename(ComicPanel? panel)
+    {
+        if (panel == null)
+        {
+            return;
+        }
+
+        foreach (var p in _panels)
+        {
+            p.IsEditing = false;
+        }
+
+        _panelNameBeforeEdit = panel.Name;
+        panel.IsEditing = true; // DataTrigger가 입력칸을 표시 → IsVisibleChanged(공용)에서 포커스.
+    }
+
+    private void PanelRenameBox_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (sender is not TextBox tb || tb.DataContext is not ComicPanel panel)
+        {
+            return;
+        }
+
+        if (e.Key == System.Windows.Input.Key.Enter)
+        {
+            CommitPanelRename(panel);
+            e.Handled = true;
+        }
+        else if (e.Key == System.Windows.Input.Key.Escape)
+        {
+            panel.Name = _panelNameBeforeEdit; // 되돌리기
+            panel.IsEditing = false;
+            e.Handled = true;
+        }
+    }
+
+    private void PanelRenameBox_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (sender is TextBox tb && tb.DataContext is ComicPanel panel && panel.IsEditing)
+        {
+            CommitPanelRename(panel);
+        }
+    }
+
+    private void CommitPanelRename(ComicPanel panel)
+    {
+        // 빈 이름은 그대로 허용(기본 "N번 칸" 표시로 복귀).
+        panel.Name = panel.Name?.Trim() ?? string.Empty;
+        panel.IsEditing = false;
+        _historyDirty = true;
     }
 
     private void AddPage_Click(object sender, RoutedEventArgs e)
@@ -491,16 +642,35 @@ public partial class MainWindow : Window
             return;
         }
 
-        // 인스펙터가 열려 있으면: 말풍선 위에서는 휠로 말풍선 크기를 확대/축소한다.
-        var bubble = FindBubbleAt(e.OriginalSource as DependencyObject);
-        if (bubble != null)
+        // 휠 크기조절은 '이미 선택된' 오브젝트에만(먼저 선택 → 휠로 크기 조절).
+        // 커서가 선택 오브젝트의 '영역' 위에 있으면, 앞에 다른 오브젝트가 가리고 있어도 적용한다(기하 판정).
+
+        // 선택된 말풍선 영역 위에서 휠 → 말풍선 크기.
+        if (_selectionKind == SelectionKind.Bubble && _selectedBubble != null &&
+            IsMouseOverElement(_selectedBubble.Container, e))
         {
-            ZoomBubble(bubble, e);
+            ZoomBubble(_selectedBubble, e);
             return;
         }
 
-        // 이미지가 선택된 칸 위에서는 휠로 이미지 확대/축소(frame의 ZoomPanelImage가 처리하도록 둔다).
-        // 그 외 빈 영역에서는 페이지를 넘기지 않고 ScrollViewer 기본 스크롤에 맡긴다.
+        // 선택된 이미지가 속한 칸 영역 위에서 휠 → 이미지 크기.
+        if (_selectionKind == SelectionKind.Image && _selectedImage != null &&
+            IsMouseOverElement(_selectedImage.OwnerPanel.Frame, e))
+        {
+            ZoomImage(_selectedImage, e);
+            return;
+        }
+
+        // 그 외(선택 안 됨 등)는 ScrollViewer 기본 스크롤에 맡긴다.
+    }
+
+    // 커서가 해당 요소의 사각 영역(로컬 0,0~크기) 위에 있는지(가려져 있어도 기하만 판정).
+    private static bool IsMouseOverElement(FrameworkElement element, MouseEventArgs e)
+    {
+        var p = e.GetPosition(element);
+        var w = element.ActualWidth > 0 ? element.ActualWidth : element.Width;
+        var h = element.ActualHeight > 0 ? element.ActualHeight : element.Height;
+        return p.X >= 0 && p.Y >= 0 && p.X <= w && p.Y <= h;
     }
 
     // 마우스 위치의 칸을 비주얼 트리에서 거슬러 올라가 찾는다.
@@ -663,7 +833,13 @@ public partial class MainWindow : Window
         _redoStack.Add(_lastSnapshot);
         var target = _undoStack[^1];
         _undoStack.RemoveAt(_undoStack.Count - 1);
+
+        // 재구성 전 현재 선택을 (페이지·인덱스로) 기억했다가, 재구성 후 같은 위치 오브젝트를 다시 선택한다.
+        var sel = CaptureSelectionRef();
+        var page = _currentPageIndex;
         RestoreSnapshot(target);
+        RestoreSelectionAfterRebuild(sel, page);
+
         _lastSnapshot = CaptureSnapshot();
         UpdateUndoRedoButtons();
         UpdateStatus("실행을 취소했습니다.");
@@ -681,10 +857,65 @@ public partial class MainWindow : Window
         _undoStack.Add(_lastSnapshot);
         var target = _redoStack[^1];
         _redoStack.RemoveAt(_redoStack.Count - 1);
+
+        var sel = CaptureSelectionRef();
+        var page = _currentPageIndex;
         RestoreSnapshot(target);
+        RestoreSelectionAfterRebuild(sel, page);
+
         _lastSnapshot = CaptureSnapshot();
         UpdateUndoRedoButtons();
         UpdateStatus("다시 실행했습니다.");
+    }
+
+    // 재구성으로 오브젝트 인스턴스가 새로 만들어지므로, 선택을 고유 ID로 식별해 둔다(인덱스보다 견고).
+    private (SelectionKind Kind, string Id) CaptureSelectionRef()
+    {
+        return _selectionKind switch
+        {
+            SelectionKind.Panel when _selectedPanel != null => (SelectionKind.Panel, _selectedPanel.Id),
+            SelectionKind.Image when _selectedImage != null => (SelectionKind.Image, _selectedImage.Id),
+            SelectionKind.Bubble when _selectedBubble != null => (SelectionKind.Bubble, _selectedBubble.Id),
+            _ => (SelectionKind.None, string.Empty)
+        };
+    }
+
+    // 재구성 후 같은 ID의 오브젝트를 다시 선택한다(페이지가 바뀌었거나 대상이 사라졌으면 선택 해제).
+    private void RestoreSelectionAfterRebuild((SelectionKind Kind, string Id) sel, int page)
+    {
+        var restored = false;
+        if (_currentPageIndex == page && !string.IsNullOrEmpty(sel.Id))
+        {
+            switch (sel.Kind)
+            {
+                case SelectionKind.Panel:
+                    var panel = _panels.FirstOrDefault(p => p.Id == sel.Id);
+                    if (panel != null) { SelectPanel(panel); restored = true; }
+                    break;
+                case SelectionKind.Image:
+                    var image = _panels.SelectMany(p => p.Images).FirstOrDefault(i => i.Id == sel.Id);
+                    if (image != null) { SelectImage(image); restored = true; }
+                    break;
+                case SelectionKind.Bubble:
+                    var bubble = _panels.SelectMany(p => p.Bubbles).FirstOrDefault(b => b.Id == sel.Id);
+                    if (bubble != null) { SelectBubble(bubble); restored = true; }
+                    break;
+            }
+        }
+
+        if (!restored)
+        {
+            // 복원 불가: 선택 상태를 깔끔히 비운다(재구성으로 _selectedX는 이미 null).
+            _selectionKind = SelectionKind.None;
+            UpdateSelectionVisuals();
+            return;
+        }
+
+        // 말풍선 선택 박스/핸들 위치는 overlay.TransformToVisual(레이아웃 의존)에 기대므로,
+        // 재구성 직후엔 부정확하다. 레이아웃이 끝난 뒤 한 번 더 위치를 잡는다.
+        Dispatcher.BeginInvoke(
+            new Action(() => { if (_selectionKind != SelectionKind.None) UpdateSelectionVisuals(); }),
+            System.Windows.Threading.DispatcherPriority.Loaded);
     }
 
     private void UpdateUndoRedoButtons()
@@ -741,10 +972,15 @@ public partial class MainWindow : Window
         UpdateWindowTitle();
     }
 
+    // 앱 버전(창 제목 등에 표시).
+    private const string AppVersion = "v0.1.0";
+
     private void UpdateWindowTitle()
     {
         var title = ComicTitleTextBox?.Text?.Trim();
-        Title = string.IsNullOrEmpty(title) ? "KomaForge - Comic Layout" : $"{title} - KomaForge";
+        Title = string.IsNullOrEmpty(title)
+            ? $"KomaForge {AppVersion} - Comic Layout"
+            : $"{title} - KomaForge {AppVersion}";
     }
 
     private string GetDefaultProjectFileName()

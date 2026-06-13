@@ -82,7 +82,14 @@ public partial class MainWindow : Window
             return;
         }
 
-        _pages[_currentPageIndex] = CaptureCurrentPage(_pages[_currentPageIndex].Name);
+        // 같은 객체를 유지한 채 내용만 갱신한다. 객체를 교체하면 페이지 리스트(바인딩)가
+        // 옛 인스턴스를 보게 되어 인라인 이름 편집(IsEditing) 등이 동작하지 않는다.
+        var page = _pages[_currentPageIndex];
+        var captured = CaptureCurrentPage(page.Name);
+        page.PageWidth = captured.PageWidth;
+        page.PageHeight = captured.PageHeight;
+        page.BlackBackground = captured.BlackBackground;
+        page.Panels = captured.Panels;
     }
 
     private ComicPageData CaptureCurrentPage(string name)
@@ -107,8 +114,10 @@ public partial class MainWindow : Window
 
     private static PanelImageData CaptureImageData(PanelImage image) => new()
     {
+        Id = image.Id,
         Path = image.Path,
         Scale = image.Scale.ScaleX,
+        ScaleY = image.Scale.ScaleY,
         TranslateX = image.Translate.X,
         TranslateY = image.Translate.Y,
         IsCropped = image.IsCropped,
@@ -122,25 +131,29 @@ public partial class MainWindow : Window
         var position = GetBubblePositionInOwnerPanel(bubble);
         return new SpeechBubbleData
         {
+            Id = bubble.Id,
             Text = bubble.TextBlock.Text,
             X = position.X,
             Y = position.Y,
             Width = bubble.Container.Width,
             Height = bubble.Container.Height,
-            FontSize = bubble.TextBlock.FontSize,
+            FontSize = bubble.MaxFontSize,
             TextMarginLeft = bubble.TextBlock.Margin.Left,
             TextMarginTop = bubble.TextBlock.Margin.Top,
             TextMarginRight = bubble.TextBlock.Margin.Right,
             TextMarginBottom = bubble.TextBlock.Margin.Bottom,
             IsCropped = bubble.IsCropped,
             IsLocked = bubble.IsLocked,
-            HasTextOutline = bubble.TextBlock.OutlineEnabled,
+            // 아웃라인 유무는 색의 불투명도로 판단(별도 ON/OFF 없음).
+            HasTextOutline = bubble.TextBlock.Stroke is SolidColorBrush sb && sb.Color.A > 0,
             FillColor = ToHex(bubble.TextBlock.Fill),
             StrokeColor = ToHex(bubble.TextBlock.Stroke),
             BackgroundColor = ToHex(bubble.BackgroundBrush),
             Shape = bubble.Shape.ToString(),
             ShapeCount = bubble.ShapeCount,
             ShapeStrength = bubble.ShapeStrength,
+            ShapeIrregularity = bubble.ShapeIrregularity,
+            ShapeWidthVariation = bubble.ShapeWidthVariation,
             PivotX = bubble.PivotX,
             PivotY = bubble.PivotY,
             Tails = bubble.Tails
@@ -164,6 +177,8 @@ public partial class MainWindow : Window
         var panelData = new ComicPanelData
         {
             Number = panel.Number,
+            Id = panel.Id,
+            Name = panel.Name,
             X = GetCanvasLeft(panel.Frame),
             Y = GetCanvasTop(panel.Frame),
             Width = panel.Frame.Width,
@@ -200,6 +215,8 @@ public partial class MainWindow : Window
                 var copiedPanel = new ComicPanelData
                 {
                     Number = panel.Number,
+                    Id = panel.Id,
+                    Name = panel.Name,
                     X = panel.X,
                     Y = panel.Y,
                     Width = panel.Width,
@@ -214,8 +231,10 @@ public partial class MainWindow : Window
                 {
                     copiedPanel.Images.Add(new PanelImageData
                     {
+                        Id = image.Id,
                         Path = MakeStorablePath(image.Path, projectDirectory),
                         Scale = image.Scale,
+                        ScaleY = image.ScaleY,
                         TranslateX = image.TranslateX,
                         TranslateY = image.TranslateY,
                         IsCropped = image.IsCropped,
@@ -272,8 +291,12 @@ public partial class MainWindow : Window
         }
 
         var image = AddPanelImage(panel, imagePath);
+        if (!string.IsNullOrEmpty(imageData.Id)) image.Id = imageData.Id; // 저장/실행취소 ID 유지(붙여넣기는 비어 있어 새 ID 유지).
         image.Scale.ScaleX = imageData.Scale <= 0 ? 1 : imageData.Scale;
-        image.Scale.ScaleY = imageData.Scale <= 0 ? 1 : imageData.Scale;
+        // ScaleY 미지정(구버전/비율 유지)이면 Scale과 동일(균일).
+        image.Scale.ScaleY = imageData.ScaleY <= 0
+            ? (imageData.Scale <= 0 ? 1 : imageData.Scale)
+            : imageData.ScaleY;
         image.Translate.X = imageData.TranslateX;
         image.Translate.Y = imageData.TranslateY;
         image.PivotX = imageData.PivotX;
@@ -294,12 +317,16 @@ public partial class MainWindow : Window
             bubbleData.X,
             bubbleData.Y);
 
+        if (!string.IsNullOrEmpty(bubbleData.Id)) bubble.Id = bubbleData.Id; // 저장/실행취소 ID 유지(붙여넣기는 새 ID).
         bubble.TextBlock.Margin = new Thickness(bubbleData.TextMarginLeft, bubbleData.TextMarginTop, bubbleData.TextMarginRight, bubbleData.TextMarginBottom);
 
         var (mappedShape, legacyStrength) = MapShape(bubbleData.Shape);
         bubble.Shape = mappedShape;
         bubble.ShapeStrength = legacyStrength ?? bubbleData.ShapeStrength;
         bubble.ShapeCount = bubbleData.ShapeCount <= 0 ? 9 : bubbleData.ShapeCount;
+        // 0/미지정(구버전)이면 기존 기본 흔들림 50으로 본다.
+        bubble.ShapeIrregularity = bubbleData.ShapeIrregularity <= 0 ? 50 : bubbleData.ShapeIrregularity;
+        bubble.ShapeWidthVariation = bubbleData.ShapeWidthVariation;
         bubble.PivotX = bubbleData.PivotX;
         bubble.PivotY = bubbleData.PivotY;
         bubble.Tails.Clear();
@@ -324,9 +351,11 @@ public partial class MainWindow : Window
         }
 
         SetBubbleLocked(bubble, bubbleData.IsLocked);
-        bubble.TextBlock.OutlineEnabled = bubbleData.HasTextOutline;
         bubble.TextBlock.Fill = new SolidColorBrush(ParseColorOr(bubbleData.FillColor, Colors.Black));
-        bubble.TextBlock.Stroke = new SolidColorBrush(ParseColorOr(bubbleData.StrokeColor, Colors.White));
+        // 아웃라인 OFF였던(또는 새 모델의 투명) 말풍선은 투명 아웃라인으로 — 색이 있어도 안 보이게.
+        bubble.TextBlock.Stroke = bubbleData.HasTextOutline
+            ? new SolidColorBrush(ParseColorOr(bubbleData.StrokeColor, Colors.White))
+            : Brushes.Transparent;
         bubble.BackgroundBrush = new SolidColorBrush(ParseColorOr(bubbleData.BackgroundColor, Colors.White));
         bubble.ShapePath.Fill = bubble.BackgroundBrush;
         panel.Bubbles.Add(bubble);
@@ -341,6 +370,8 @@ public partial class MainWindow : Window
             overrideY ?? panelData.Y,
             panelData.Width,
             panelData.Height);
+        if (!string.IsNullOrEmpty(panelData.Id)) panel.Id = panelData.Id; // 저장/실행취소 ID 유지(붙여넣기는 새 ID).
+        panel.Name = panelData.Name ?? string.Empty;
         AddPanel(panel);
 
         foreach (var imageData in panelData.Images)
@@ -383,6 +414,8 @@ public partial class MainWindow : Window
         _selectedImage = null;
         PanelCanvas.Children.Clear();
         PageOverlay.Children.Clear();
+        // 호버 강조 대상은 방금 파괴됐으니 참조를 끊는다(다음 마우스 이동에서 재설정).
+        _hoveredObject = null;
         PanelListBox.Items.Clear();
         UpdateImageList(null);
         UpdateBubbleList(null);
@@ -398,9 +431,11 @@ public partial class MainWindow : Window
         _isUpdatingPageList = true;
         PageListBox.Items.Clear();
 
-        for (var index = 0; index < _pages.Count; index++)
+        // 항목은 ComicPageData 객체(인라인 이름 편집 바인딩용). 번호는 ItemTemplate의 AlternationIndex로 표시.
+        foreach (var page in _pages)
         {
-            PageListBox.Items.Add($"{index + 1}. {_pages[index].Name}");
+            page.IsEditing = false; // 목록 갱신 시 편집 모드 해제.
+            PageListBox.Items.Add(page);
         }
 
         PageListBox.SelectedIndex = _currentPageIndex;
@@ -427,6 +462,9 @@ public partial class MainWindow : Window
         UpdatePanelOrder();
         UpdateLayoutSummary();
     }
+
+    // 오브젝트(칸/이미지/말풍선)용 새 고유 ID. 실행취소/다시실행 후 같은 오브젝트를 다시 선택하는 데 쓴다.
+    private static string NewObjectId() => Guid.NewGuid().ToString("N");
 
     private ComicPanel CreatePanel(int number, double x, double y, double width, double height)
     {
@@ -516,6 +554,13 @@ public partial class MainWindow : Window
         // z-순서: 흰배경 → 크롭 이미지 → 크롭 말풍선 → 테두리 → 크롭OFF 이미지 → 크롭OFF 말풍선.
         // (크롭 ON 콘텐츠는 테두리 뒤, 크롭 OFF 콘텐츠는 테두리 앞)
         var grid = new Grid { ClipToBounds = false };
+        // 칸 선택 히트 영역을 프레임보다 바깥으로 조금 넓히는 투명 영역(맨 뒤에 깔아 콘텐츠 클릭은 방해하지 않는다).
+        // 프레임의 자식이라 클릭이 BeginPanelDrag로 라우팅되고, 바깥 밴드는 IsOnPanelBorder가 테두리로 인정한다.
+        grid.Children.Add(new System.Windows.Shapes.Rectangle
+        {
+            Fill = Brushes.Transparent,
+            Margin = new Thickness(-PanelOutwardHitMargin)
+        });
         grid.Children.Add(quadFill);
         grid.Children.Add(imageCanvas);   // 크롭 ON 이미지
         grid.Children.Add(overlay);       // 크롭 ON 말풍선 (테두리 뒤)
@@ -543,7 +588,8 @@ public partial class MainWindow : Window
         {
             QuadFill = quadFill,
             QuadBorderLines = quadBorderLines,
-            FreeImageCanvas = freeImageCanvas
+            FreeImageCanvas = freeImageCanvas,
+            Id = NewObjectId()
         };
         Canvas.SetLeft(frame, ClampPanelX(x, width));
         Canvas.SetTop(frame, ClampPanelY(y, height));
@@ -552,14 +598,13 @@ public partial class MainWindow : Window
         frame.PreviewMouseMove += (_, e) => DragPanel(panel, e);
         frame.PreviewMouseLeftButtonUp += (_, e) => EndPanelDrag(panel, e);
         frame.LostMouseCapture += (_, _) => ResetDragState();
-        frame.PreviewMouseWheel += (_, e) => ZoomPanelImage(panel, e);
         frame.DragOver += (_, e) => DragOverPanel(panel, e);
         frame.Drop += (_, e) => DropImageOnPanel(panel, e);
         resizeHandle.DragStarted += (_, _) => SelectPanel(panel);
         resizeHandle.DragDelta += (_, e) => ResizePanel(panel, e);
 
-        // 새로 생성하는 칸은 기본 고정 ON(불러오기 시에는 LoadPage에서 저장된 상태로 덮어쓴다).
-        SetPanelLocked(panel, true);
+        // 새로 생성하는 칸은 기본 잠금 OFF(불러오기 시에는 LoadPage에서 저장된 상태로 덮어쓴다).
+        SetPanelLocked(panel, false);
 
         UpdatePanelShape(panel);
         return panel;
@@ -683,8 +728,7 @@ public partial class MainWindow : Window
             FontWeight = FontWeights.SemiBold,
             TextWrapping = TextWrapping.Wrap,
             Fill = Brushes.Black,
-            Stroke = Brushes.White,
-            OutlineEnabled = false,
+            Stroke = Brushes.Transparent, // 기본 아웃라인 없음(투명). 색을 고르면 아웃라인이 생긴다.
             TextAlignment = TextAlignment.Center,
             Padding = new Thickness(8, 4, 8, 4),
             Margin = DefaultBubbleTextMargin,
@@ -757,8 +801,11 @@ public partial class MainWindow : Window
 
         var bubble = new SpeechBubble(ownerPanel, container, bodyPath, shapePath, textBlock, selectionBorder, resizeHandle)
         {
-            Shape = GetSelectedBubbleShape(),
-            LineHost = lineHost
+            // 새 말풍선 기본 모양은 원형(RoundRect+강도0=타원). 불러오기·붙여넣기는 이후 실제 모양으로 덮어쓴다.
+            Shape = BubbleShape.RoundRect,
+            LineHost = lineHost,
+            MaxFontSize = fontSize,
+            Id = NewObjectId()
         };
         bubble.RelativeX = x;
         bubble.RelativeY = y;

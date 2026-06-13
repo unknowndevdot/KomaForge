@@ -105,7 +105,8 @@ public partial class MainWindow : Window
         var panelImage = new PanelImage(panel, path, kind, layer, content, image, media, selectionBorder, scale, translate)
         {
             Frames = frames,
-            FrameDelays = delays
+            FrameDelays = delays,
+            Id = NewObjectId()
         };
         panel.Images.Add(panelImage);
         panel.ImageCanvas.Children.Add(layer);
@@ -355,8 +356,23 @@ public partial class MainWindow : Window
             return false;
         }
 
-        var panelNumber = _selectedImage.OwnerPanel.Number;
+        var panel = _selectedImage.OwnerPanel;
+        var panelNumber = panel.Number;
+        var index = panel.Images.IndexOf(_selectedImage);
         RemovePanelImage(_selectedImage);
+
+        // 삭제 후 선택: 위(index-1) → 없으면 아래(0) → 하나도 없으면 미선택.
+        var next = NeighborAfterDelete(panel.Images, index);
+        if (next != null)
+        {
+            SelectImage(next);
+            ScrollInspectorToSection();
+        }
+        else
+        {
+            ClearSelection(announce: false);
+        }
+
         UpdateStatus($"{panelNumber}번 칸의 선택 이미지를 제거했습니다.");
         return true;
     }
@@ -369,15 +385,38 @@ public partial class MainWindow : Window
         }
 
         var panel = _selectedBubble.OwnerPanel;
+        var index = panel.Bubbles.IndexOf(_selectedBubble);
         RemoveBubbleFromCurrentParent(_selectedBubble);
         panel.Bubbles.Remove(_selectedBubble);
         _selectedBubble = null;
         UpdateMergedBubbleOutlines();
         UpdateBubbleList(panel);
-        UpdateSelectionLabels();
-        UpdateSelectionVisuals();
+
+        // 삭제 후 선택: 위(index-1) → 없으면 아래(0) → 하나도 없으면 미선택.
+        var next = NeighborAfterDelete(panel.Bubbles, index);
+        if (next != null)
+        {
+            SelectBubble(next);
+            ScrollInspectorToSection();
+        }
+        else
+        {
+            ClearSelection(announce: false);
+        }
+
         UpdateStatus("말풍선을 삭제했습니다.");
         return true;
+    }
+
+    // 삭제된 항목(index 위치) 기준으로 선택할 이웃: 위(index-1) → 없으면 첫 항목(아래) → 비었으면 null.
+    private static T? NeighborAfterDelete<T>(IReadOnlyList<T> list, int index) where T : class
+    {
+        if (index - 1 >= 0 && index - 1 < list.Count)
+        {
+            return list[index - 1];
+        }
+
+        return list.Count > 0 ? list[0] : null;
     }
 
     private void MoveSelectedImage(int direction)

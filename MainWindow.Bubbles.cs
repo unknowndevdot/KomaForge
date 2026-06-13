@@ -31,19 +31,62 @@ public partial class MainWindow : Window
 
         bubble.BodyPath.Data = bubble.Shape switch
         {
-            BubbleShape.CloudExplosion => CreateCloudExplosionGeometry(width, height, bubble.ShapeCount, bubble.ShapeStrength),
-            BubbleShape.Shout => CreateShoutGeometry(width, height, bubble.ShapeCount, bubble.ShapeStrength),
-            BubbleShape.Flash => CreateFlashGeometry(width, height, bubble.ShapeCount, bubble.ShapeStrength),
-            BubbleShape.ConcentrationLines => CreateConcentrationLinesGeometry(width, height, bubble.ShapeCount, bubble.ShapeStrength),
-            BubbleShape.EffectLines => CreateEffectLinesGeometry(width, height, bubble.ShapeCount, bubble.ShapeStrength),
+            BubbleShape.CloudExplosion => CreateCloudExplosionGeometry(width, height, bubble.ShapeCount, bubble.ShapeStrength, bubble.ShapeIrregularity, bubble.ShapeWidthVariation),
+            BubbleShape.Flash => CreateFlashGeometry(width, height, bubble.ShapeCount, bubble.ShapeStrength, bubble.ShapeIrregularity),
+            BubbleShape.ConcentrationLines => CreateConcentrationLinesGeometry(width, height, bubble.ShapeCount, bubble.ShapeStrength, bubble.ShapeIrregularity),
+            BubbleShape.EffectLines => CreateEffectLinesGeometry(width, height, bubble.ShapeCount, bubble.ShapeStrength, bubble.ShapeIrregularity),
             // 테두리 없음: 본체 도형 없이 글자만 보인다(채움·외곽선 모두 없음).
             BubbleShape.None => null,
             _ => CreateRoundRectGeometry(width, height, bubble.ShapeStrength)
         };
 
+        // 말풍선 크기에 맞춰 글자 크기를 자동 축소(설정값을 최대로).
+        ApplyBubbleAutoFit(bubble);
+
         UpdateBubbleTailHandles(bubble);
         // 이 말풍선이 속한 칸만 갱신해도 충분하다(다른 칸의 도형은 영향받지 않음).
         UpdateMergedBubbleOutlines(bubble.OwnerPanel);
+    }
+
+    // 말풍선 안에 글자가 들어가도록, 설정 글자 크기(MaxFontSize)를 최대로 두고
+    // 들어가지 않으면 실제 렌더 크기(TextBlock.FontSize)를 줄인다(이분 탐색).
+    private static void ApplyBubbleAutoFit(SpeechBubble bubble)
+    {
+        var tb = bubble.TextBlock;
+        var max = bubble.MaxFontSize;
+        const double min = 6;
+
+        var m = tb.Margin;
+        var p = tb.Padding;
+        var availW = bubble.Container.Width - m.Left - m.Right - p.Left - p.Right;
+        var availH = bubble.Container.Height - m.Top - m.Bottom - p.Top - p.Bottom;
+
+        if (availW <= 1 || availH <= 1 || string.IsNullOrEmpty(tb.Text))
+        {
+            tb.FontSize = Math.Max(min, max);
+            return;
+        }
+
+        bool Fits(double f)
+        {
+            var s = tb.MeasureAtFont(f, availW);
+            return s.Width <= availW + 0.5 && s.Height <= availH + 0.5;
+        }
+
+        if (Fits(max))
+        {
+            tb.FontSize = max;
+            return;
+        }
+
+        double lo = min, hi = max;
+        for (var i = 0; i < 14; i++)
+        {
+            var mid = (lo + hi) / 2;
+            if (Fits(mid)) lo = mid; else hi = mid;
+        }
+
+        tb.FontSize = Math.Max(min, lo);
     }
 
     // 채움은 말풍선별 ShapePath가(배경색을 따로 줄 수 있게), 외곽선은 칸 단위로 합쳐(Union) 그린다.
@@ -125,7 +168,7 @@ public partial class MainWindow : Window
             bubble.ShapePath.Data = null;
             bubble.ShapePath.Clip = null;
 
-            var signature = $"{bubble.Shape}|{bubble.Container.Width:F1}|{bubble.Container.Height:F1}|{bubble.ShapeCount}|{bubble.ShapeStrength:F1}|{ToHex(bubble.TextBlock.Fill)}";
+            var signature = $"{bubble.Shape}|{bubble.Container.Width:F1}|{bubble.Container.Height:F1}|{bubble.ShapeCount}|{bubble.ShapeStrength:F1}|{bubble.ShapeIrregularity:F1}|{ToHex(bubble.TextBlock.Fill)}";
             if (signature == bubble.LineHostSignature)
             {
                 return; // 위치만 바뀐 경우: 로컬 좌표라 그대로 따라오므로 재생성 불필요.
@@ -273,6 +316,7 @@ public partial class MainWindow : Window
     private void PositionSelectedTailHandles()
     {
         PositionBubbleSelectionBox();
+        PositionImageSelectionBox();
         PositionTextRegionHandles();
         PositionPanelCornerHandles();
         EnsureTailHandles();
@@ -316,44 +360,12 @@ public partial class MainWindow : Window
                 Visibility = Visibility.Hidden
             };
 
-            _bubbleResizeHandle = new Thumb
-            {
-                Width = 18,
-                Height = 18,
-                Cursor = Cursors.SizeNWSE,
-                Background = new SolidColorBrush(Color.FromRgb(43, 111, 106)),
-                BorderBrush = Brushes.White,
-                BorderThickness = new Thickness(2),
-                HorizontalAlignment = HorizontalAlignment.Left,
-                VerticalAlignment = VerticalAlignment.Top,
-                Visibility = Visibility.Hidden
-            };
-            _bubbleResizeHandle.DragStarted += (_, _) =>
-            {
-                if (_selectedBubble != null)
-                {
-                    SelectBubble(_selectedBubble);
-                }
-            };
-            _bubbleResizeHandle.DragDelta += (_, e) =>
-            {
-                if (_selectedBubble != null)
-                {
-                    ResizeBubble(_selectedBubble, e);
-                }
-            };
         }
 
         if (!PageOverlay.Children.Contains(_bubbleSelectionBox))
         {
             PageOverlay.Children.Add(_bubbleSelectionBox);
             Panel.SetZIndex(_bubbleSelectionBox, int.MaxValue - 2);
-        }
-
-        if (!PageOverlay.Children.Contains(_bubbleResizeHandle))
-        {
-            PageOverlay.Children.Add(_bubbleResizeHandle!);
-            Panel.SetZIndex(_bubbleResizeHandle!, int.MaxValue - 1);
         }
     }
 
@@ -363,10 +375,11 @@ public partial class MainWindow : Window
 
         var show = _selectionKind == SelectionKind.Bubble && _selectedBubble != null;
         _bubbleSelectionBox!.Visibility = show ? Visibility.Visible : Visibility.Hidden;
-        _bubbleResizeHandle!.Visibility = show ? Visibility.Visible : Visibility.Hidden;
 
         if (!show || _selectedBubble == null)
         {
+            // 핸들도 함께 숨긴다.
+            PositionBubbleResizeHandles(false, 0, 0, 0, 0, SelectionAccentBrush);
             return;
         }
 
@@ -377,16 +390,14 @@ public partial class MainWindow : Window
         // 잠긴 말풍선은 선택 박스/핸들을 빨강 계열로 구분한다.
         var accent = _selectedBubble.IsLocked ? SelectionLockedBrush : SelectionAccentBrush;
         _bubbleSelectionBox.BorderBrush = accent;
-        _bubbleResizeHandle.Background = accent;
 
         Canvas.SetLeft(_bubbleSelectionBox, origin.X);
         Canvas.SetTop(_bubbleSelectionBox, origin.Y);
         _bubbleSelectionBox.Width = w;
         _bubbleSelectionBox.Height = h;
 
-        // 핸들은 박스 우하단 안쪽 모서리에 둔다.
-        Canvas.SetLeft(_bubbleResizeHandle, origin.X + w - _bubbleResizeHandle.Width);
-        Canvas.SetTop(_bubbleResizeHandle, origin.Y + h - _bubbleResizeHandle.Height);
+        // 8방향 리사이즈 핸들을 박스 8지점에 배치(잠긴 말풍선도 표시하되 빨강).
+        PositionBubbleResizeHandles(true, origin.X, origin.Y, w, h, accent);
     }
 
     private void EnsureTextRegionHandles()
@@ -540,6 +551,9 @@ public partial class MainWindow : Window
     {
         EnsurePanelCornerHandles();
 
+        // 8방향 리사이즈 핸들도 함께 갱신한다(사변형 모드가 아닐 때만 표시).
+        PositionPanelResizeHandles();
+
         var show = _selectionKind == SelectionKind.Panel && _selectedPanel != null && _selectedPanel.CornerMode;
         var visibility = show ? Visibility.Visible : Visibility.Hidden;
         foreach (var handle in _panelCornerHandles!)
@@ -646,7 +660,6 @@ public partial class MainWindow : Window
         return item.Tag?.ToString() switch
         {
             "CloudExplosion" => BubbleShape.CloudExplosion,
-            "Shout" => BubbleShape.Shout,
             "Flash" => BubbleShape.Flash,
             "ConcentrationLines" => BubbleShape.ConcentrationLines,
             "EffectLines" => BubbleShape.EffectLines,
@@ -661,7 +674,7 @@ public partial class MainWindow : Window
         return raw switch
         {
             "CloudExplosion" => (BubbleShape.CloudExplosion, null),
-            "Shout" => (BubbleShape.Shout, null),
+            "Shout" => (BubbleShape.CloudExplosion, null), // 삭제된 파도/외침 → 구름/폭발로 대체(구버전 호환).
             "Flash" => (BubbleShape.Flash, null),
             "ConcentrationLines" => (BubbleShape.ConcentrationLines, null),
             "EffectLines" => (BubbleShape.EffectLines, null),

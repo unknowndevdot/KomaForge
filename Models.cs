@@ -7,7 +7,7 @@ using System.Windows.Threading;
 
 namespace KomaForge;
 
-public sealed class ComicPanel
+public sealed class ComicPanel : System.ComponentModel.INotifyPropertyChanged
 {
     public ComicPanel(
         int number,
@@ -36,6 +36,32 @@ public sealed class ComicPanel
     }
 
     public int Number { get; set; }
+    // 세션 내 안정적 고유 ID(실행취소/다시실행 후 같은 오브젝트를 다시 선택하기 위함). 저장에도 round-trip.
+    public string Id { get; set; } = string.Empty;
+
+    // 사용자 지정 칸 이름(비어 있으면 기본 "N번 칸"으로 표시). 저장에 round-trip.
+    private string _name = string.Empty;
+    public string Name
+    {
+        get => _name;
+        set { if (_name != value) { _name = value; OnChanged(nameof(Name)); OnChanged(nameof(DisplayText)); } }
+    }
+
+    // 리스트에서 인라인 이름 편집 중인지(UI 전용).
+    private bool _isEditing;
+    public bool IsEditing
+    {
+        get => _isEditing;
+        set { if (_isEditing != value) { _isEditing = value; OnChanged(nameof(IsEditing)); } }
+    }
+
+    // 칸 리스트 표시 텍스트(잠금 아이콘 + 이름/기본 번호).
+    public string DisplayText => $"{(IsLocked ? "🔒 " : "")}{(string.IsNullOrWhiteSpace(Name) ? $"{Number}번 칸" : Name)}";
+
+    public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+    private void OnChanged(string name)
+        => PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(name));
+
     public Border Frame { get; }
     public Canvas ImageCanvas { get; }
     public TextBlock Placeholder { get; }
@@ -62,10 +88,7 @@ public sealed class ComicPanel
     // 직사각형 모서리(0=TL,1=TR,2=BR,3=BL) 기준 변위(px). 드래그로 기울어진 사변형을 만든다.
     public Point[] CornerOffsets { get; } = { new Point(), new Point(), new Point(), new Point() };
 
-    public override string ToString()
-    {
-        return $"{(IsLocked ? "🔒 " : "")}{Number}번 칸";
-    }
+    public override string ToString() => DisplayText;
 }
 
 public enum MediaKind
@@ -102,6 +125,8 @@ public sealed class PanelImage
     }
 
     public ComicPanel OwnerPanel { get; }
+    // 세션 내 안정적 고유 ID(실행취소/다시실행 후 재선택용). 저장에도 round-trip.
+    public string Id { get; set; } = string.Empty;
     public string Path { get; }
     public MediaKind Kind { get; }
     public Grid Layer { get; }
@@ -170,6 +195,8 @@ public sealed class SpeechBubble
     }
 
     public ComicPanel OwnerPanel { get; }
+    // 세션 내 안정적 고유 ID(실행취소/다시실행 후 재선택용). 저장에도 round-trip.
+    public string Id { get; set; } = string.Empty;
     public Border Container { get; }
     public System.Windows.Shapes.Path BodyPath { get; }
     // 오버레이에 놓이는, 이 말풍선의 본체+꼬리 채움/외곽선 경로(꼬리도 같은 도형이라 배경색을 따라간다).
@@ -184,6 +211,10 @@ public sealed class SpeechBubble
     public BubbleShape Shape { get; set; } = BubbleShape.RoundRect;
     public int ShapeCount { get; set; } = 9;
     public double ShapeStrength { get; set; }
+    // 불규칙도(0~100): 0이면 모양이 균일, 높을수록 들쭉날쭉해진다. 50이 기존 기본 흔들림.
+    public double ShapeIrregularity { get; set; } = 50;
+    // 폭 불규칙도(0~100, 구름/폭발 전용): 상하좌우(변 중앙)를 바깥으로 넓혀 모서리가 패인 모양을 만든다. 0이면 효과 없음.
+    public double ShapeWidthVariation { get; set; }
     // 말풍선 배경색(채움). 기본 흰색.
     public Brush BackgroundBrush { get; set; } = Brushes.White;
     // 선 호스트(집중선/속도선)를 마지막으로 만들 때의 파라미터 서명. 위치만 바뀐 경우 재생성을 건너뛴다.
@@ -194,11 +225,13 @@ public sealed class SpeechBubble
     // 칸 리사이즈 시 따라갈 기준점(0~1). X: 0=좌, 1=우 / Y: 0=하, 1=상. 기본 (0,1)=좌상단 고정.
     public double PivotX { get; set; }
     public double PivotY { get; set; } = 1;
+    // 사용자가 지정한 글자 크기(= 최대). 실제 렌더 크기(TextBlock.FontSize)는 말풍선이 작으면 이 값 이하로 자동 축소된다.
+    public double MaxFontSize { get; set; } = 18;
 
     public override string ToString()
     {
-        var index = OwnerPanel.Bubbles.IndexOf(this) + 1;
         var prefix = IsLocked ? "🔒 " : "";
+        var shapeName = ShapeDisplayName(Shape);
         var preview = TextBlock.Text.ReplaceLineEndings(" ").Trim();
 
         if (preview.Length > 18)
@@ -207,9 +240,21 @@ public sealed class SpeechBubble
         }
 
         return string.IsNullOrWhiteSpace(preview)
-            ? $"{prefix}{index}번 말풍선"
-            : $"{prefix}{index}번 말풍선 - {preview}";
+            ? $"{prefix}{shapeName}"
+            : $"{prefix}{shapeName} - {preview}";
     }
+
+    // 모양 → 리스트 표시용 한글 이름(인스펙터 모양 콤보 라벨과 동일).
+    private static string ShapeDisplayName(BubbleShape shape) => shape switch
+    {
+        BubbleShape.RoundRect => "원형/사각",
+        BubbleShape.CloudExplosion => "구름/폭발",
+        BubbleShape.Flash => "플래시",
+        BubbleShape.ConcentrationLines => "집중선",
+        BubbleShape.EffectLines => "속도선",
+        BubbleShape.None => "테두리 없음",
+        _ => "말풍선"
+    };
 }
 
 // 글자에 색 아웃라인(테두리)을 그릴 수 있는 텍스트 요소. 기본 TextBlock 대용으로 쓴다.
@@ -289,6 +334,30 @@ public sealed class OutlinedTextBlock : FrameworkElement
         return ft;
     }
 
+    // 지정한 글자 크기로 줄바꿈(maxWidth)했을 때의 텍스트 크기를 잰다(자동 축소 계산용).
+    public Size MeasureAtFont(double fontSize, double maxWidth)
+    {
+        var typeface = new Typeface(FontFamily ?? new FontFamily("Segoe UI"), FontStyles.Normal, FontWeight, FontStretches.Normal);
+        var ft = new FormattedText(
+            Text ?? string.Empty,
+            System.Globalization.CultureInfo.CurrentUICulture,
+            FlowDirection.LeftToRight,
+            typeface,
+            Math.Max(1, fontSize),
+            Brushes.Black,
+            VisualTreeHelper.GetDpi(this).PixelsPerDip)
+        {
+            TextAlignment = TextAlignment
+        };
+
+        if (TextWrapping != TextWrapping.NoWrap && maxWidth > 0 && !double.IsInfinity(maxWidth))
+        {
+            ft.MaxTextWidth = Math.Max(1, maxWidth);
+        }
+
+        return new Size(ft.Width, ft.Height);
+    }
+
     protected override Size MeasureOverride(Size availableSize)
     {
         var pad = Padding;
@@ -304,7 +373,8 @@ public sealed class OutlinedTextBlock : FrameworkElement
         var ft = CreateFormattedText(maxWidth);
         var geometry = ft.BuildGeometry(new Point(pad.Left, pad.Top));
 
-        if (OutlineEnabled && Stroke != null)
+        // 아웃라인 색이 불투명할 때만 그린다(투명 = 아웃라인 없음). 별도 ON/OFF 없이 색으로만 제어.
+        if (Stroke is SolidColorBrush strokeBrush && strokeBrush.Color.A > 0)
         {
             var penWidth = Math.Max(3, FontSize / 3.5);
             var pen = new Pen(Stroke, penWidth)
@@ -341,7 +411,6 @@ public enum BubbleShape
 {
     RoundRect,
     CloudExplosion,
-    Shout,
     Flash,
     ConcentrationLines,
     EffectLines,

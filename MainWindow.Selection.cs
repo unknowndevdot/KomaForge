@@ -125,7 +125,7 @@ public partial class MainWindow : Window
     {
         bubble.Container.Width = BubbleWidthSlider.Value;
         bubble.Container.Height = BubbleHeightSlider.Value;
-        bubble.TextBlock.FontSize = BubbleFontSlider.Value;
+        // 글자 크기는 BubbleFontBox(숫자 입력)가 별도로 관리한다.
         UpdateBubbleGeometry(bubble);
         SetBubblePositionInOwnerPanel(bubble, BubbleXSlider.Value, BubbleYSlider.Value);
     }
@@ -150,27 +150,35 @@ public partial class MainWindow : Window
         BubbleLockCheckBox.IsChecked = bubble.IsLocked;
         BubblePivotXBox.Text = $"{bubble.PivotX:0.##}";
         BubblePivotYBox.Text = $"{bubble.PivotY:0.##}";
-        BubbleOutlineCheckBox.IsChecked = bubble.TextBlock.OutlineEnabled;
-        SelectComboColor(BubbleFillColorComboBox, ToHex(bubble.TextBlock.Fill));
-        SelectComboColor(BubbleStrokeColorComboBox, ToHex(bubble.TextBlock.Stroke));
-        SelectComboColor(BubbleBackgroundColorComboBox, ToHex(bubble.BackgroundBrush));
+        SelectBubbleColorInCombo(BubbleFillColorComboBox, bubble.TextBlock.Fill);
+        SelectBubbleColorInCombo(BubbleStrokeColorComboBox, bubble.TextBlock.Stroke); // 투명이면 '없음'
+        SelectBubbleColorInCombo(BubbleBackgroundColorComboBox, bubble.BackgroundBrush);
+        // 돌기 최대값은 모양에 따라 다르므로(파도/외침·플래시=1000) 값 클램프 전에 먼저 맞춘다.
+        BubbleShapeCountSlider.Maximum = bubble.Shape == BubbleShape.Flash ? 1000 : 100;
         BubbleShapeCountSlider.Value = Math.Clamp(bubble.ShapeCount, BubbleShapeCountSlider.Minimum, BubbleShapeCountSlider.Maximum);
         BubbleShapeStrengthSlider.Value = Math.Clamp(bubble.ShapeStrength, BubbleShapeStrengthSlider.Minimum, BubbleShapeStrengthSlider.Maximum);
+        BubbleShapeIrregularitySlider.Value = Math.Clamp(bubble.ShapeIrregularity, BubbleShapeIrregularitySlider.Minimum, BubbleShapeIrregularitySlider.Maximum);
+        BubbleShapeWidthVarSlider.Value = Math.Clamp(bubble.ShapeWidthVariation, BubbleShapeWidthVarSlider.Minimum, BubbleShapeWidthVarSlider.Maximum);
+        // 로딩 중엔 슬라이더 ValueChanged가 안 탈 수 있어 라벨을 직접 설정한다.
+        BubbleShapeStrengthText.Text = $"{StrengthOptionName(bubble.Shape)}: {BubbleShapeStrengthSlider.Value:0}";
+        BubbleShapeCountText.Text = $"돌기: {BubbleShapeCountSlider.Value:0}";
+        BubbleShapeIrregularityText.Text = $"불규칙도(깎임): {BubbleShapeIrregularitySlider.Value:0}";
+        BubbleShapeWidthVarText.Text = $"불규칙도(폭): {BubbleShapeWidthVarSlider.Value:0}";
+        UpdateBubbleShapeOptionVisibility(bubble.Shape);
         // '안으로 깎기'는 선택한 꼬리 개별 값이므로, 선택된 꼬리가 있으면 그 값으로(없으면 해제).
         BubbleTailInwardCheckBox.IsChecked = _selectedBubbleTail?.TailInward == true;
         BubbleShapeComboBox.SelectedIndex = bubble.Shape switch
         {
             BubbleShape.CloudExplosion => 1,
-            BubbleShape.Shout => 2,
-            BubbleShape.Flash => 3,
-            BubbleShape.ConcentrationLines => 4,
-            BubbleShape.EffectLines => 5,
-            BubbleShape.None => 6,
+            BubbleShape.Flash => 2,
+            BubbleShape.ConcentrationLines => 3,
+            BubbleShape.EffectLines => 4,
+            BubbleShape.None => 5,
             _ => 0
         };
         BubbleWidthSlider.Value = bubble.Container.Width;
         BubbleHeightSlider.Value = bubble.Container.Height;
-        BubbleFontSlider.Value = bubble.TextBlock.FontSize;
+        BubbleFontBox.Text = $"{bubble.MaxFontSize:0}";
         BubbleXSlider.Value = Math.Clamp(position.X, BubbleXSlider.Minimum, BubbleXSlider.Maximum);
         BubbleYSlider.Value = Math.Clamp(position.Y, BubbleYSlider.Minimum, BubbleYSlider.Maximum);
         _isLoadingInspector = false;
@@ -298,6 +306,7 @@ public partial class MainWindow : Window
         {
             case SelectionKind.Image when _selectedImage != null:
                 ResetImageToNativeTopLeft(_selectedImage); // 100% + 좌상단 스냅.
+                PositionImageSelectionBox();                // 이동·배율이 바뀌었으니 선택 박스·핸들도 따라가게.
                 UpdateStatus(_selectedImage.IsCropped
                     ? "이미지를 100%로 맞추고 칸 좌상단에 스냅했습니다."
                     : "이미지를 100%로 맞추고 페이지 좌상단에 스냅했습니다.");
@@ -571,7 +580,7 @@ public partial class MainWindow : Window
         _isUpdatingImageList = false;
     }
 
-    private void ClearSelection()
+    private void ClearSelection(bool announce = true)
     {
         _selectionKind = SelectionKind.None;
         _selectedPanel = null;
@@ -584,7 +593,10 @@ public partial class MainWindow : Window
         UpdateBubbleTailList(null);
         UpdateSelectionLabels();
         UpdateSelectionVisuals();
-        UpdateStatus("선택을 해제했습니다.");
+        if (announce)
+        {
+            UpdateStatus("선택을 해제했습니다.");
+        }
     }
 
     // 말풍선 안 텍스트의 기본 여백(생성·리셋 시). 좀 더 안쪽으로 들어가도록 키웠다.
@@ -622,7 +634,8 @@ public partial class MainWindow : Window
                 line.Stroke = borderBrush;
             }
 
-            panel.ResizeHandle.Visibility = isSelectedPanel && !panel.IsLocked ? Visibility.Visible : Visibility.Hidden;
+            // 칸 리사이즈는 PageOverlay의 8방향 핸들(_panelResizeHandles)이 담당하므로 칸 안의 단일 핸들은 항상 숨긴다.
+            panel.ResizeHandle.Visibility = Visibility.Hidden;
 
             foreach (var bubble in panel.Bubbles)
             {
@@ -676,6 +689,18 @@ public partial class MainWindow : Window
         SetSectionHighlight(ImageSectionBorder, _selectionKind == SelectionKind.Image);
         SetSectionHighlight(BubbleSectionBorder, _selectionKind == SelectionKind.Bubble);
 
+        // 오브젝트(칸/이미지/말풍선)가 선택되면 페이지 강조를 끈다(페이지와 동시 강조 방지).
+        if (_selectionKind != SelectionKind.None)
+        {
+            SetPageSelected(false);
+        }
+
+        // 아무것도 선택되지 않았으면 이미지/말풍선 섹션(리스트 포함)을 통째로 숨긴다.
+        // (칸/이미지/말풍선 중 무언가 선택되면 해당 칸 맥락이 있으므로 두 섹션을 보인다.)
+        var hasSelection = _selectionKind != SelectionKind.None;
+        SetVisible(ImageSectionBorder, hasSelection);
+        SetVisible(BubbleSectionBorder, hasSelection);
+
         // 각 섹션의 리스트 아래 옵션은 그 섹션의 오브젝트가 선택됐을 때만 표시(아니면 리스트만).
         SetVisible(PanelEditControls, _selectionKind == SelectionKind.Panel);
         SetVisible(ImageEditControls, _selectionKind == SelectionKind.Image);
@@ -709,7 +734,6 @@ public partial class MainWindow : Window
             PanelHeightText == null ||
             BubbleWidthText == null ||
             BubbleHeightText == null ||
-            BubbleFontText == null ||
             BubbleXText == null ||
             BubbleYText == null ||
             BubbleTailXText == null ||
@@ -725,7 +749,6 @@ public partial class MainWindow : Window
         PanelHeightText.Text = $"칸 높이: {PanelHeightSlider.Value:0}px";
         BubbleWidthText.Text = $"말풍선 너비: {BubbleWidthSlider.Value:0}px";
         BubbleHeightText.Text = $"말풍선 높이: {BubbleHeightSlider.Value:0}px";
-        BubbleFontText.Text = $"말풍선 글자: {BubbleFontSlider.Value:0}px";
         BubbleXText.Text = $"말풍선 X 위치: {BubbleXSlider.Value:0}px";
         BubbleYText.Text = $"말풍선 Y 위치: {BubbleYSlider.Value:0}px";
         BubbleTailXText.Text = $"꼬리 끝점 X: {BubbleTailXSlider.Value:0}px";
@@ -743,6 +766,8 @@ public partial class MainWindow : Window
         _isDraggingPanel = false;
         _isDraggingPanelImage = false;
         _isDraggingBubble = false;
+        _pendingSelect = null;
+        _pendingCycle = null;
 
         if (_selectedPanel != null)
         {

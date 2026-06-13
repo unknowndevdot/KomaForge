@@ -112,6 +112,7 @@ public partial class MainWindow : Window
             if (lastImage != null)
             {
                 SelectImage(lastImage);
+                ScrollInspectorToSection();
             }
 
             UpdateStatus($"{_selectedPanel.Number}번 칸에 이미지 {dialog.FileNames.Length}개를 넣었습니다.");
@@ -155,7 +156,7 @@ public partial class MainWindow : Window
             "대사를 입력하세요",
             bubbleWidth,
             bubbleHeight,
-            BubbleFontSlider.Value,
+            CurrentFontInput(),
             _selectedPanel.Frame.Width / 2 - bubbleWidth / 2,
             _selectedPanel.Frame.Height / 2 - bubbleHeight / 2);
 
@@ -170,6 +171,7 @@ public partial class MainWindow : Window
         UpdateBubbleOrder(_selectedPanel);
         UpdateBubbleList(_selectedPanel);
         SelectBubble(bubble);
+        ScrollInspectorToSection();
         UpdateStatus($"{_selectedPanel.Number}번 칸에 말풍선을 추가했습니다.");
     }
 
@@ -338,6 +340,24 @@ public partial class MainWindow : Window
         UpdateInspectorLabels();
     }
 
+    // 글자 크기 입력칸의 현재 값(없거나 잘못되면 18). 6~300으로 제한.
+    private double CurrentFontInput()
+        => double.TryParse(BubbleFontBox?.Text, out var v) ? Math.Clamp(v, 6, 300) : 18;
+
+    private void BubbleFontBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_isLoadingInspector || _selectedBubble == null)
+        {
+            return;
+        }
+
+        if (double.TryParse(BubbleFontBox.Text, out var v))
+        {
+            _selectedBubble.MaxFontSize = Math.Clamp(v, 6, 300); // 설정값은 최대치(autofit이 더 줄일 수 있음).
+            UpdateBubbleGeometry(_selectedBubble);
+        }
+    }
+
     private void BubbleSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
         if (_selectedBubble != null && !_isLoadingInspector)
@@ -356,17 +376,6 @@ public partial class MainWindow : Window
         }
 
         SetBubbleCrop(_selectedBubble, BubbleCropCheckBox.IsChecked == true);
-    }
-
-    private void BubbleOutlineCheckBox_Changed(object sender, RoutedEventArgs e)
-    {
-        if (_isLoadingInspector || _selectedBubble == null)
-        {
-            return;
-        }
-
-        _selectedBubble.TextBlock.OutlineEnabled = BubbleOutlineCheckBox.IsChecked == true;
-        UpdateStatus(_selectedBubble.TextBlock.OutlineEnabled ? "글자 아웃라인을 켰습니다." : "글자 아웃라인을 껐습니다.");
     }
 
     private void BubbleTailInwardCheckBox_Changed(object sender, RoutedEventArgs e)
@@ -402,27 +411,8 @@ public partial class MainWindow : Window
         ("초록", "#2F9E44"), ("파랑", "#1971C2"), ("보라", "#9C36B5"),
     };
 
-    private void PopulateColorCombo(ComboBox combo, string defaultHex)
-    {
-        foreach (var (name, hex) in ColorPalette)
-        {
-            var swatch = new Border
-            {
-                Width = 14,
-                Height = 14,
-                Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex)),
-                BorderBrush = new SolidColorBrush(Color.FromRgb(170, 170, 170)),
-                BorderThickness = new Thickness(1),
-                Margin = new Thickness(0, 0, 6, 0)
-            };
-            var panel = new StackPanel { Orientation = Orientation.Horizontal };
-            panel.Children.Add(swatch);
-            panel.Children.Add(new TextBlock { Text = name, VerticalAlignment = VerticalAlignment.Center });
-            combo.Items.Add(new ComboBoxItem { Content = panel, Tag = hex });
-        }
-
-        SelectComboColor(combo, defaultHex);
-    }
+    // 투명(아웃라인 없음)을 나타내는 특수 태그. ColorConverter가 알파 0으로 파싱한다.
+    private const string TransparentHex = "#00FFFFFF";
 
     private static void SelectComboColor(ComboBox combo, string hex)
     {
@@ -442,7 +432,14 @@ public partial class MainWindow : Window
     {
         if (combo.SelectedItem is ComboBoxItem item && item.Tag is string hex)
         {
-            return (Color)ColorConverter.ConvertFromString(hex);
+            try
+            {
+                return (Color)ColorConverter.ConvertFromString(hex);
+            }
+            catch
+            {
+                return fallback; // '직접 지정…' 같은 비색상 태그·잘못된 hex는 기본값.
+            }
         }
 
         return fallback;
@@ -451,7 +448,10 @@ public partial class MainWindow : Window
     private static string ToHex(Brush? brush)
     {
         var color = (brush as SolidColorBrush)?.Color ?? Colors.Black;
-        return $"#{color.R:X2}{color.G:X2}{color.B:X2}";
+        // 불투명이면 #RRGGBB, 알파가 있으면 #AARRGGBB(반투명 색 보존).
+        return color.A == 255
+            ? $"#{color.R:X2}{color.G:X2}{color.B:X2}"
+            : $"#{color.A:X2}{color.R:X2}{color.G:X2}{color.B:X2}";
     }
 
     private static Color ParseColorOr(string? hex, Color fallback)
@@ -473,35 +473,35 @@ public partial class MainWindow : Window
 
     private void BubbleFillColorComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_isLoadingInspector || _selectedBubble == null)
-        {
-            return;
-        }
-
-        _selectedBubble.TextBlock.Fill = new SolidColorBrush(GetComboColor(BubbleFillColorComboBox, Colors.Black));
-        // 집중선/효과선은 선 색이 글자색을 따르므로 즉시 갱신한다.
-        UpdateBubbleShapePath(_selectedBubble);
+        OnBubbleColorComboChanged(BubbleFillColorComboBox,
+            () => (_selectedBubble!.TextBlock.Fill as SolidColorBrush)?.Color ?? Colors.Black,
+            c =>
+            {
+                _selectedBubble!.TextBlock.Fill = new SolidColorBrush(c);
+                // 집중선/효과선은 선 색이 글자색을 따르므로 즉시 갱신한다.
+                UpdateBubbleShapePath(_selectedBubble);
+            },
+            Colors.Black);
     }
 
     private void BubbleStrokeColorComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_isLoadingInspector || _selectedBubble == null)
-        {
-            return;
-        }
-
-        _selectedBubble.TextBlock.Stroke = new SolidColorBrush(GetComboColor(BubbleStrokeColorComboBox, Colors.White));
+        OnBubbleColorComboChanged(BubbleStrokeColorComboBox,
+            () => (_selectedBubble!.TextBlock.Stroke as SolidColorBrush)?.Color ?? Colors.Transparent,
+            c => _selectedBubble!.TextBlock.Stroke = new SolidColorBrush(c),
+            Colors.Transparent);
     }
 
     private void BubbleBackgroundColorComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_isLoadingInspector || _selectedBubble == null)
-        {
-            return;
-        }
-
-        _selectedBubble.BackgroundBrush = new SolidColorBrush(GetComboColor(BubbleBackgroundColorComboBox, Colors.White));
-        _selectedBubble.ShapePath.Fill = _selectedBubble.BackgroundBrush;
+        OnBubbleColorComboChanged(BubbleBackgroundColorComboBox,
+            () => (_selectedBubble!.BackgroundBrush as SolidColorBrush)?.Color ?? Colors.White,
+            c =>
+            {
+                _selectedBubble!.BackgroundBrush = new SolidColorBrush(c);
+                _selectedBubble.ShapePath.Fill = _selectedBubble.BackgroundBrush;
+            },
+            Colors.White);
     }
 
     private void ImageCropCheckBox_Changed(object sender, RoutedEventArgs e)
@@ -547,13 +547,52 @@ public partial class MainWindow : Window
 
         _selectedBubble.Shape = GetSelectedBubbleShape();
         UpdateBubbleGeometry(_selectedBubble);
+        UpdateBubbleShapeOptionVisibility(_selectedBubble.Shape);
+        // 리스트 표시 이름이 모양을 따르므로 콤보 변경 시 갱신한다.
+        var keep = BubbleListBox.SelectedItem;
+        BubbleListBox.Items.Refresh();
+        BubbleListBox.SelectedItem = keep;
+    }
+
+    // 모양마다 의미 있는 옵션만 보여 준다.
+    //  - 원형/사각: 강도만(타원↔사각)
+    //  - 구름/폭발: 강도·돌기·불규칙도·폭 불규칙도
+    //  - 파도/외침·플래시·집중선·속도선: 강도·돌기·불규칙도
+    //  - 테두리 없음: 옵션 없음
+    private void UpdateBubbleShapeOptionVisibility(BubbleShape shape)
+    {
+        var hasStrength = shape != BubbleShape.None;
+        var hasCountAndIrregularity = shape is BubbleShape.CloudExplosion
+            or BubbleShape.Flash
+            or BubbleShape.ConcentrationLines or BubbleShape.EffectLines;
+        var hasWidthVar = shape == BubbleShape.CloudExplosion;
+
+        // 플래시는 돌기를 1000까지 허용(그 외는 100).
+        BubbleShapeCountSlider.Maximum = shape == BubbleShape.Flash ? 1000 : 100;
+
+        SetShapeOptionVisible(BubbleShapeStrengthText, BubbleShapeStrengthSlider, hasStrength);
+        SetShapeOptionVisible(BubbleShapeCountText, BubbleShapeCountSlider, hasCountAndIrregularity);
+        SetShapeOptionVisible(BubbleShapeIrregularityText, BubbleShapeIrregularitySlider, hasCountAndIrregularity);
+        SetShapeOptionVisible(BubbleShapeWidthVarText, BubbleShapeWidthVarSlider, hasWidthVar);
+    }
+
+    // 강도 슬라이더의 모양별 표시 이름(속도선은 방향이라 '회전').
+    private static string StrengthOptionName(BubbleShape shape)
+        => shape == BubbleShape.EffectLines ? "회전" : "강도";
+
+    private static void SetShapeOptionVisible(UIElement label, UIElement slider, bool visible)
+    {
+        var v = visible ? Visibility.Visible : Visibility.Collapsed;
+        if (label != null) label.Visibility = v;
+        if (slider != null) slider.Visibility = v;
     }
 
     private void BubbleShapeStrengthSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
         if (BubbleShapeStrengthText != null)
         {
-            BubbleShapeStrengthText.Text = $"강도: {BubbleShapeStrengthSlider.Value:0}";
+            var name = StrengthOptionName(_selectedBubble?.Shape ?? BubbleShape.RoundRect);
+            BubbleShapeStrengthText.Text = $"{name}: {BubbleShapeStrengthSlider.Value:0}";
         }
 
         if (_isLoadingInspector || _selectedBubble == null)
@@ -578,6 +617,38 @@ public partial class MainWindow : Window
         }
 
         _selectedBubble.ShapeCount = (int)Math.Round(BubbleShapeCountSlider.Value);
+        UpdateBubbleGeometry(_selectedBubble);
+    }
+
+    private void BubbleShapeIrregularitySlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (BubbleShapeIrregularityText != null)
+        {
+            BubbleShapeIrregularityText.Text = $"불규칙도(깎임): {BubbleShapeIrregularitySlider.Value:0}";
+        }
+
+        if (_isLoadingInspector || _selectedBubble == null)
+        {
+            return;
+        }
+
+        _selectedBubble.ShapeIrregularity = BubbleShapeIrregularitySlider.Value;
+        UpdateBubbleGeometry(_selectedBubble);
+    }
+
+    private void BubbleShapeWidthVarSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (BubbleShapeWidthVarText != null)
+        {
+            BubbleShapeWidthVarText.Text = $"불규칙도(폭): {BubbleShapeWidthVarSlider.Value:0}";
+        }
+
+        if (_isLoadingInspector || _selectedBubble == null)
+        {
+            return;
+        }
+
+        _selectedBubble.ShapeWidthVariation = BubbleShapeWidthVarSlider.Value;
         UpdateBubbleGeometry(_selectedBubble);
     }
 
@@ -607,6 +678,8 @@ public partial class MainWindow : Window
         }
 
         _selectedBubble.TextBlock.Text = SelectedBubbleTextBox.Text;
+        // 텍스트가 길어지면 말풍선에 맞춰 글자 크기를 자동 축소한다.
+        ApplyBubbleAutoFit(_selectedBubble);
     }
 
 }

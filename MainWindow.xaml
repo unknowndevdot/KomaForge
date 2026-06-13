@@ -1,7 +1,7 @@
 <Window x:Class="KomaForge.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="KomaForge - Comic Layout"
+        Title="KomaForge v0.1.0 - Comic Layout"
         Width="1280"
         Height="820"
         MinWidth="980"
@@ -10,11 +10,13 @@
     <DockPanel>
         <Menu DockPanel.Dock="Top" Background="#F3F0EA">
             <MenuItem Header="파일(_F)">
-                <MenuItem Header="불러오기..." InputGestureText="Ctrl+O" Click="LoadProject_Click" />
-                <MenuItem Header="저장" InputGestureText="Ctrl+S" Click="SaveMenuItem_Click" />
+                <MenuItem x:Name="OpenMenuItem" Header="불러오기..." InputGestureText="Ctrl+O" Click="LoadProject_Click" />
+                <MenuItem x:Name="SaveMenuItem" Header="저장" InputGestureText="Ctrl+S" Click="SaveMenuItem_Click" />
                 <MenuItem Header="다른 이름으로 저장..." Click="SaveProject_Click" />
                 <Separator />
                 <MenuItem Header="페이지 이미지로 내보내기..." Click="ExportPagesAsImages_Click" />
+                <Separator />
+                <MenuItem x:Name="PreferencesMenuItem" Header="환경설정..." InputGestureText="Ctrl+," Click="Preferences_Click" />
                 <Separator />
                 <MenuItem Header="종료" Click="ExitMenuItem_Click" />
             </MenuItem>
@@ -22,9 +24,9 @@
                 <MenuItem x:Name="UndoMenuItem" Header="실행취소" InputGestureText="Ctrl+Z" Click="Undo_Click" />
                 <MenuItem x:Name="RedoMenuItem" Header="다시실행" InputGestureText="Ctrl+Y" Click="Redo_Click" />
                 <Separator />
-                <MenuItem Header="잘라내기" InputGestureText="Ctrl+X" Click="Cut_Click" />
-                <MenuItem Header="복사" InputGestureText="Ctrl+C" Click="Copy_Click" />
-                <MenuItem Header="붙여넣기" InputGestureText="Ctrl+V" Click="Paste_Click" />
+                <MenuItem x:Name="CutMenuItem" Header="잘라내기" InputGestureText="Ctrl+X" Click="Cut_Click" />
+                <MenuItem x:Name="CopyMenuItem" Header="복사" InputGestureText="Ctrl+C" Click="Copy_Click" />
+                <MenuItem x:Name="PasteMenuItem" Header="붙여넣기" InputGestureText="Ctrl+V" Click="Paste_Click" />
             </MenuItem>
             <MenuItem Header="보기(_V)">
                 <MenuItem x:Name="PageFitMenuItem"
@@ -50,23 +52,69 @@
                           VerticalScrollBarVisibility="Auto"
                           PreviewMouseWheel="InspectorScrollViewer_PreviewMouseWheel">
                 <StackPanel Margin="0,0,12,0">
-                    <TextBlock Text="만화 제목"
+                    <TextBlock Text="설명"
                                Foreground="#55514A"
                                Margin="0,0,0,6" />
                     <TextBox x:Name="ComicTitleTextBox"
+                             AcceptsReturn="True"
+                             TextWrapping="Wrap"
+                             VerticalScrollBarVisibility="Disabled"
                              Padding="6,2"
-                             VerticalContentAlignment="Center"
                              TextChanged="ComicTitleTextBox_TextChanged"
                              Margin="0,0,0,18" />
 
-                    <Border Style="{StaticResource InspectorSection}">
+                    <Border x:Name="PageSectionBorder"
+                            Style="{StaticResource InspectorSection}"
+                            IsKeyboardFocusWithinChanged="PageSection_FocusChanged">
                     <StackPanel>
                     <TextBlock Text="페이지" Style="{StaticResource SectionHeader}" />
                     <ListBox x:Name="PageListBox"
                              MinHeight="86"
                              MaxHeight="150"
+                             AlternationCount="10000"
                              SelectionChanged="PageListBox_SelectionChanged"
-                             Margin="0,0,0,8" />
+                             MouseDoubleClick="PageListBox_MouseDoubleClick"
+                             PreviewKeyDown="PageListBox_PreviewKeyDown"
+                             Margin="0,0,0,8">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Grid>
+                                    <!-- 표시: "1. 이름" (번호는 항목 위치). 편집 중이면 숨김. -->
+                                    <StackPanel Orientation="Horizontal">
+                                        <StackPanel.Style>
+                                            <Style TargetType="StackPanel">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsEditing}" Value="True">
+                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </StackPanel.Style>
+                                        <TextBlock Text="{Binding (ItemsControl.AlternationIndex), RelativeSource={RelativeSource AncestorType=ListBoxItem}, Converter={StaticResource AddOneConverter}}" />
+                                        <TextBlock Text=". " />
+                                        <TextBlock Text="{Binding Name}" />
+                                    </StackPanel>
+                                    <!-- 편집: 더블클릭/F2 시 표시되는 입력칸(기본 숨김은 Style로 — 로컬 값은 트리거를 덮어쓰므로). -->
+                                    <TextBox Text="{Binding Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                             Padding="2,0"
+                                             IsVisibleChanged="PageRenameBox_IsVisibleChanged"
+                                             KeyDown="PageRenameBox_KeyDown"
+                                             LostFocus="PageRenameBox_LostFocus">
+                                        <TextBox.Style>
+                                            <Style TargetType="TextBox">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsEditing}" Value="True">
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBox.Style>
+                                    </TextBox>
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
                     <UniformGrid Rows="1" Columns="4" Margin="0,0,0,18">
                         <Button Content="추가"
                                 Click="AddPage_Click"
@@ -82,6 +130,8 @@
                                 Margin="0" />
                     </UniformGrid>
 
+                    <!-- 페이지 리스트에 포커스가 있을 때만 보이는 하위 옵션 -->
+                    <StackPanel x:Name="PageEditControls" Visibility="Collapsed">
                     <TextBlock Text="페이지 크기 (너비 × 높이)"
                                Foreground="#55514A"
                                Margin="0,0,0,6" />
@@ -93,7 +143,7 @@
                         </Grid.ColumnDefinitions>
                         <TextBox x:Name="PageWidthTextBox"
                                  Grid.Column="0"
-                                 Text="820"
+                                 Text="832"
                                  Padding="6,2"
                                  VerticalContentAlignment="Center"
                                  TextChanged="PageSizeTextBox_TextChanged" />
@@ -104,7 +154,7 @@
                                    Foreground="#55514A" />
                         <TextBox x:Name="PageHeightTextBox"
                                  Grid.Column="2"
-                                 Text="1120"
+                                 Text="1216"
                                  Padding="6,2"
                                  VerticalContentAlignment="Center"
                                  TextChanged="PageSizeTextBox_TextChanged" />
@@ -139,7 +189,7 @@
                                  Margin="0"
                                  ToolTip="자동 생성 간격" />
                     </UniformGrid>
-                    <Button Content="생성"
+                    <Button Content="구성"
                             Click="ApplyLayout_Click"
                             HorizontalAlignment="Stretch"
                             Margin="0,0,0,8" />
@@ -148,17 +198,56 @@
                                Foreground="#55514A"
                                Margin="0,0,0,0" />
                     </StackPanel>
+                    </StackPanel>
                     </Border>
 
                     <Border x:Name="PanelSectionBorder" Style="{StaticResource InspectorSection}">
                     <StackPanel>
-                    <TextBlock Text="페이지 내 칸" Style="{StaticResource SectionHeader}" />
+                    <TextBlock Text="칸" Style="{StaticResource SectionHeader}" />
 
                     <ListBox x:Name="PanelListBox"
                              MinHeight="100"
                              MaxHeight="170"
                              SelectionChanged="PanelListBox_SelectionChanged"
-                             Margin="0,0,0,8" />
+                             MouseDoubleClick="PanelListBox_MouseDoubleClick"
+                             PreviewKeyDown="PanelListBox_PreviewKeyDown"
+                             Margin="0,0,0,8">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Grid>
+                                    <!-- 표시: 잠금 아이콘 + 이름(비어 있으면 "N번 칸"). 편집 중이면 숨김. -->
+                                    <TextBlock Text="{Binding DisplayText}">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsEditing}" Value="True">
+                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                    <!-- 편집: 더블클릭/F2 시 표시되는 입력칸(기본 숨김은 Style로 — 로컬 값은 트리거를 덮어쓰므로). -->
+                                    <TextBox Text="{Binding Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                             Padding="2,0"
+                                             IsVisibleChanged="PageRenameBox_IsVisibleChanged"
+                                             KeyDown="PanelRenameBox_KeyDown"
+                                             LostFocus="PanelRenameBox_LostFocus">
+                                        <TextBox.Style>
+                                            <Style TargetType="TextBox">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsEditing}" Value="True">
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBox.Style>
+                                    </TextBox>
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
                     <UniformGrid Rows="1" Columns="4" Margin="0,0,0,12">
                         <Button Content="추가"
                                 Click="AddPanel_Click"
@@ -191,9 +280,9 @@
                     </StackPanel>
                     </Border>
 
-                    <Border x:Name="ImageSectionBorder" Style="{StaticResource InspectorSection}">
+                    <Border x:Name="ImageSectionBorder" Style="{StaticResource InspectorSection}" Visibility="Collapsed">
                     <StackPanel>
-                    <TextBlock Text="선택한 칸 내 이미지" Style="{StaticResource SectionHeader}" />
+                    <TextBlock Text="이미지" Style="{StaticResource SectionHeader}" />
                     <ListBox x:Name="ImageListBox"
                              MinHeight="86"
                              MaxHeight="150"
@@ -277,9 +366,9 @@
                     </StackPanel>
                     </Border>
 
-                    <Border x:Name="BubbleSectionBorder" Style="{StaticResource InspectorSection}">
+                    <Border x:Name="BubbleSectionBorder" Style="{StaticResource InspectorSection}" Visibility="Collapsed">
                     <StackPanel>
-                    <TextBlock Text="선택한 칸 내 말풍선" Style="{StaticResource SectionHeader}" />
+                    <TextBlock Text="말풍선" Style="{StaticResource SectionHeader}" />
                     <ListBox x:Name="BubbleListBox"
                              MinHeight="86"
                              MaxHeight="150"
@@ -324,6 +413,9 @@
                         <TextBlock Text="," VerticalAlignment="Center" Margin="4,0" Foreground="#55514A" />
                         <TextBox x:Name="BubblePivotYBox" Width="44" Text="1" TextChanged="BubblePivotBox_Changed" />
                     </StackPanel>
+                    <Border Style="{StaticResource InspectorGroup}">
+                    <StackPanel>
+                    <TextBlock Text="텍스트 · 색상" Style="{StaticResource GroupHeader}" />
                     <TextBlock Text="말풍선 텍스트"
                                Foreground="#55514A"
                                Margin="0,0,0,6" />
@@ -335,13 +427,22 @@
                              TextChanged="SelectedBubbleTextBox_TextChanged"
                              Margin="0,0,0,12" />
 
-                    <TextBlock x:Name="BubbleFontText" Foreground="#55514A" />
-                    <Slider x:Name="BubbleFontSlider"
-                            Minimum="12"
-                            Maximum="34"
-                            Value="18"
-                            ValueChanged="BubbleSlider_ValueChanged"
-                            Margin="0,4,0,12" />
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                        <TextBlock Text="글자 크기"
+                                   Width="64"
+                                   VerticalAlignment="Center"
+                                   Foreground="#55514A" />
+                        <TextBox x:Name="BubbleFontBox"
+                                 Width="60"
+                                 Text="18"
+                                 Padding="6,2"
+                                 VerticalContentAlignment="Center"
+                                 TextChanged="BubbleFontBox_TextChanged" />
+                        <TextBlock Text="px"
+                                   VerticalAlignment="Center"
+                                   Margin="6,0,0,0"
+                                   Foreground="#55514A" />
+                    </StackPanel>
 
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
                         <TextBlock Text="글자색"
@@ -361,13 +462,7 @@
                                   Width="130"
                                   SelectionChanged="BubbleBackgroundColorComboBox_SelectionChanged" />
                     </StackPanel>
-                    <CheckBox x:Name="BubbleOutlineCheckBox"
-                              Content="글자 아웃라인"
-                              IsChecked="False"
-                              Checked="BubbleOutlineCheckBox_Changed"
-                              Unchecked="BubbleOutlineCheckBox_Changed"
-                              Margin="0,0,0,8" />
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
                         <TextBlock Text="아웃라인색"
                                    Width="64"
                                    VerticalAlignment="Center"
@@ -376,7 +471,12 @@
                                   Width="130"
                                   SelectionChanged="BubbleStrokeColorComboBox_SelectionChanged" />
                     </StackPanel>
+                    </StackPanel>
+                    </Border>
 
+                    <Border Style="{StaticResource InspectorGroup}">
+                    <StackPanel>
+                    <TextBlock Text="모양" Style="{StaticResource GroupHeader}" />
                     <TextBlock Text="말풍선 모양"
                                Foreground="#55514A"
                                Margin="0,0,0,6" />
@@ -385,7 +485,6 @@
                               Margin="0,0,0,12">
                         <ComboBoxItem Content="원형/사각" Tag="RoundRect" IsSelected="True" />
                         <ComboBoxItem Content="구름/폭발" Tag="CloudExplosion" />
-                        <ComboBoxItem Content="파도/외침" Tag="Shout" />
                         <ComboBoxItem Content="플래시" Tag="Flash" />
                         <ComboBoxItem Content="집중선" Tag="ConcentrationLines" />
                         <ComboBoxItem Content="속도선" Tag="EffectLines" />
@@ -407,12 +506,34 @@
                                Margin="0,0,0,2" />
                     <Slider x:Name="BubbleShapeCountSlider"
                             Minimum="3"
-                            Maximum="30"
+                            Maximum="100"
                             Value="9"
                             IsSnapToTickEnabled="True"
                             TickFrequency="1"
                             ValueChanged="BubbleShapeCountSlider_ValueChanged"
                             Margin="0,0,0,12" />
+
+                    <TextBlock x:Name="BubbleShapeIrregularityText"
+                               Foreground="#55514A"
+                               Margin="0,0,0,2" />
+                    <Slider x:Name="BubbleShapeIrregularitySlider"
+                            Minimum="0"
+                            Maximum="100"
+                            Value="50"
+                            ValueChanged="BubbleShapeIrregularitySlider_ValueChanged"
+                            Margin="0,0,0,12" />
+
+                    <TextBlock x:Name="BubbleShapeWidthVarText"
+                               Foreground="#55514A"
+                               Margin="0,0,0,2" />
+                    <Slider x:Name="BubbleShapeWidthVarSlider"
+                            Minimum="0"
+                            Maximum="100"
+                            Value="0"
+                            ValueChanged="BubbleShapeWidthVarSlider_ValueChanged"
+                            Margin="0,0,0,2" />
+                    </StackPanel>
+                    </Border>
 
                     <StackPanel Visibility="Collapsed">
                         <TextBlock x:Name="BubbleWidthText" Foreground="#55514A" />
@@ -447,10 +568,9 @@
                                 Margin="0,4,0,14" />
                     </StackPanel>
 
-                    <TextBlock Text="말풍선의 꼬리"
-                               FontWeight="SemiBold"
-                               Foreground="{StaticResource TextBrush}"
-                               Margin="0,0,0,8" />
+                    <Border Style="{StaticResource InspectorGroup}">
+                    <StackPanel>
+                    <TextBlock Text="꼬리" Style="{StaticResource GroupHeader}" />
                     <ListBox x:Name="BubbleTailListBox"
                              MinHeight="72"
                              MaxHeight="130"
@@ -505,43 +625,8 @@
                                Foreground="#77736A"
                                Margin="0,2,0,0" />
                     </StackPanel>
-                    </StackPanel>
                     </Border>
-
-                    <Border Style="{StaticResource InspectorSection}">
-                    <StackPanel>
-                    <TextBlock Text="단축키" Style="{StaticResource SectionHeader}" />
-
-                    <TextBlock TextWrapping="Wrap" Foreground="#55514A" Margin="0,0,0,5">
-                        <Run FontWeight="Bold" Foreground="#2B6F6A">Ctrl+Z / Ctrl+Y</Run> — 실행취소 / 다시실행
-                    </TextBlock>
-                    <TextBlock TextWrapping="Wrap" Foreground="#55514A" Margin="0,0,0,5">
-                        <Run FontWeight="Bold" Foreground="#2B6F6A">Ctrl+S</Run> — 현재 파일에 덮어쓰기 저장
-                    </TextBlock>
-                    <TextBlock TextWrapping="Wrap" Foreground="#55514A" Margin="0,0,0,5">
-                        <Run FontWeight="Bold" Foreground="#2B6F6A">Esc</Run> — 선택 해제
-                    </TextBlock>
-                    <TextBlock TextWrapping="Wrap" Foreground="#55514A" Margin="0,0,0,5">
-                        <Run FontWeight="Bold" Foreground="#2B6F6A">Delete</Run> — 선택한 이미지·말풍선 삭제
-                    </TextBlock>
-                    <TextBlock TextWrapping="Wrap" Foreground="#55514A" Margin="0,0,0,5">
-                        <Run FontWeight="Bold" Foreground="#2B6F6A">PgUp / PgDn</Run> — 이전 / 다음 페이지
-                    </TextBlock>
-                    <TextBlock TextWrapping="Wrap" Foreground="#55514A" Margin="0,0,0,5">
-                        <Run FontWeight="Bold" Foreground="#2B6F6A">↑ / ↓</Run> — 선택 대상(칸·이미지·말풍선) 순서 이동
-                    </TextBlock>
-                    <TextBlock TextWrapping="Wrap" Foreground="#55514A" Margin="0,0,0,5">
-                        <Run FontWeight="Bold" Foreground="#2B6F6A">마우스 휠</Run> — 크기 조절
-                    </TextBlock>
-                    <TextBlock TextWrapping="Wrap" Foreground="#55514A" Margin="0,0,0,5">
-                        <Run FontWeight="Bold" Foreground="#2B6F6A">L</Run> — 선택 오브젝트 잠금/해제
-                    </TextBlock>
-                    <TextBlock TextWrapping="Wrap" Foreground="#55514A" Margin="0,0,0,5">
-                        <Run FontWeight="Bold" Foreground="#2B6F6A">Ctrl+R</Run> — 선택 리셋 (이미지=100%+좌상단 · 칸=기본 사각형 · 말풍선=텍스트 여백)
-                    </TextBlock>
-                    <TextBlock TextWrapping="Wrap" Foreground="#55514A" Margin="0,0,0,5">
-                        <Run FontWeight="Bold" Foreground="#2B6F6A">Ctrl+클릭</Run> — 잠금된 오브젝트도 선택
-                    </TextBlock>
+                    </StackPanel>
                     </StackPanel>
                     </Border>
                 </StackPanel>
@@ -583,20 +668,19 @@
                     <!-- PageSurface/PageOverlay는 클리핑하지 않아 선택 UI(핸들·박스)가 페이지 밖에서도 보인다.
                          실제 콘텐츠(칸) 클리핑은 PanelCanvas가 담당한다. -->
                     <Grid x:Name="PageSurface"
-                          Width="820"
-                          Height="1120"
+                          Width="832"
+                          Height="1216"
                           ClipToBounds="False"
                           Background="#FFFFFF"
-                          PreviewMouseLeftButtonDown="PageSurface_PreviewMouseLeftButtonDown"
                           PreviewMouseMove="PageSurface_PreviewMouseMove"
                           MouseLeave="PageSurface_MouseLeave">
                         <Canvas x:Name="PanelCanvas"
-                                Width="820"
-                                Height="1120"
+                                Width="832"
+                                Height="1216"
                                 ClipToBounds="True" />
                         <Canvas x:Name="PageOverlay"
-                                Width="820"
-                                Height="1120"
+                                Width="832"
+                                Height="1216"
                                 ClipToBounds="False" />
                     </Grid>
                 </Border>

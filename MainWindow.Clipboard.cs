@@ -18,6 +18,14 @@ public partial class MainWindow : Window
 
     private void Cut_Click(object sender, RoutedEventArgs e) => CutSelection();
 
+    // 클립보드 DTO의 ID를 비워, 붙여넣기로 만들어지는 오브젝트가 (원본과 겹치지 않는) 새 ID를 받게 한다.
+    private static void ClearClipboardIds(ComicPanelData panel)
+    {
+        panel.Id = string.Empty;
+        foreach (var image in panel.Images) image.Id = string.Empty;
+        foreach (var bubble in panel.Bubbles) bubble.Id = string.Empty;
+    }
+
     private void Copy_Click(object sender, RoutedEventArgs e) => CopySelection();
 
     private void Paste_Click(object sender, RoutedEventArgs e) => PasteClipboard();
@@ -30,16 +38,19 @@ public partial class MainWindow : Window
             case SelectionKind.Panel when _selectedPanel != null:
                 _clipboardKind = ClipboardKind.Panel;
                 _clipboardPanel = CapturePanelData(_selectedPanel);
+                ClearClipboardIds(_clipboardPanel);
                 UpdateStatus("칸을 복사했습니다.");
                 break;
             case SelectionKind.Image when _selectedImage != null:
                 _clipboardKind = ClipboardKind.Image;
                 _clipboardImage = CaptureImageData(_selectedImage);
+                _clipboardImage.Id = string.Empty;
                 UpdateStatus("이미지를 복사했습니다.");
                 break;
             case SelectionKind.Bubble when _selectedBubble != null:
                 _clipboardKind = ClipboardKind.Bubble;
                 _clipboardBubble = CaptureBubbleData(_selectedBubble);
+                _clipboardBubble.Id = string.Empty;
                 UpdateStatus("말풍선을 복사했습니다.");
                 break;
             default:
@@ -56,18 +67,21 @@ public partial class MainWindow : Window
             case SelectionKind.Panel when _selectedPanel != null:
                 _clipboardKind = ClipboardKind.Panel;
                 _clipboardPanel = CapturePanelData(_selectedPanel);
+                ClearClipboardIds(_clipboardPanel);
                 DeleteSelectedPanel();
                 UpdateStatus("칸을 잘라냈습니다.");
                 break;
             case SelectionKind.Image when _selectedImage != null:
                 _clipboardKind = ClipboardKind.Image;
                 _clipboardImage = CaptureImageData(_selectedImage);
+                _clipboardImage.Id = string.Empty;
                 DeleteSelectedImage();
                 UpdateStatus("이미지를 잘라냈습니다.");
                 break;
             case SelectionKind.Bubble when _selectedBubble != null:
                 _clipboardKind = ClipboardKind.Bubble;
                 _clipboardBubble = CaptureBubbleData(_selectedBubble);
+                _clipboardBubble.Id = string.Empty;
                 DeleteSelectedBubble();
                 UpdateStatus("말풍선을 잘라냈습니다.");
                 break;
