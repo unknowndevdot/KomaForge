@@ -32,7 +32,7 @@ public partial class MainWindow
         _colorCombos.Add((ImageGradientColorComboBox, true)); // 투명 포함(투명=이미지 사라짐)
         _colorCombos.Add((PanelBackgroundColorComboBox, false)); // 칸 배경(단색)
         _colorCombos.Add((PanelBorderColorComboBox, false));     // 칸 테두리(단색)
-        _colorCombos.Add((PageBackgroundColorComboBox, false));  // 페이지 배경(단색)
+        _colorCombos.Add((PageBackgroundColorComboBox, true));   // 페이지 배경(투명 포함 → 투명 내보내기)
         _colorCombos.Add((BubbleBorderColorComboBox, false));    // 말풍선 테두리(단색)
 
         RebuildColorCombos();

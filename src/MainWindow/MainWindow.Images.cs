@@ -407,7 +407,9 @@ public partial class MainWindow : Window
         }
         else if (kind == MediaKind.Video)
         {
-            media!.Play();
+            // 길이가 로드되면 출력 길이 지정에 맞춰 재생 속도를 적용한다.
+            media!.MediaOpened += (_, _) => ApplyVideoSpeed(panelImage);
+            media.Play();
         }
 
         return panelImage;
@@ -544,10 +546,14 @@ public partial class MainWindow : Window
             return;
         }
 
+        var fc = player.FrameCount;
+        // 출력 길이를 지정하면 전 프레임을 그 시간 동안 균등 재생, 미지정(0)이면 원본 프레임별 지연대로.
+        var overrideMs = panelImage.OutputDuration > 0 ? Math.Max(20, panelImage.OutputDuration * 1000.0 / fc) : 0;
+
         var index = 0; // 프레임 0은 AddPanelImage에서 이미 디코드해 표시했고 플레이어 버퍼에 들어있다.
         var timer = new DispatcherTimer(DispatcherPriority.Render)
         {
-            Interval = TimeSpan.FromMilliseconds(Math.Max(20, player.DelayMs(0)))
+            Interval = TimeSpan.FromMilliseconds(overrideMs > 0 ? overrideMs : Math.Max(20, player.DelayMs(0)))
         };
         timer.Tick += (_, _) =>
         {
@@ -568,10 +574,66 @@ public partial class MainWindow : Window
                 return; // 디코드 실패 프레임은 건너뛴다(다음 틱에서 회복 시도).
             }
 
-            timer.Interval = TimeSpan.FromMilliseconds(Math.Max(20, p.DelayMs(index)));
+            timer.Interval = TimeSpan.FromMilliseconds(overrideMs > 0 ? overrideMs : Math.Max(20, p.DelayMs(index)));
         };
         panelImage.FrameTimer = timer;
         timer.Start();
+    }
+
+    // 이미지의 실제 출력값 (길이초, fps). 지정값이 있으면 그것, 없으면 원본에서 산출.
+    private static (double Duration, double Fps) EffectiveOutput(PanelImage image)
+    {
+        if (image.Kind == MediaKind.Animated && image.Player != null && image.Player.FrameCount > 1)
+        {
+            var p = image.Player;
+            double totalMs = 0;
+            for (var i = 0; i < p.FrameCount; i++)
+            {
+                totalMs += p.DelayMs(i);
+            }
+            var srcDur = totalMs > 0 ? totalMs / 1000.0 : 1.0;
+            var srcFps = srcDur > 0 ? p.FrameCount / srcDur : 12.0;
+            return (image.OutputDuration > 0 ? image.OutputDuration : srcDur,
+                    image.OutputFps > 0 ? image.OutputFps : srcFps);
+        }
+
+        if (image.Kind == MediaKind.Video)
+        {
+            var natSec = image.Media != null && image.Media.NaturalDuration.HasTimeSpan
+                ? image.Media.NaturalDuration.TimeSpan.TotalSeconds : 0;
+            var srcDur = natSec > 0 ? natSec : 1.0;
+            return (image.OutputDuration > 0 ? image.OutputDuration : srcDur,
+                    image.OutputFps > 0 ? image.OutputFps : 30.0);
+        }
+
+        return (image.OutputDuration > 0 ? image.OutputDuration : 1.0, image.OutputFps > 0 ? image.OutputFps : 12.0);
+    }
+
+    // 출력 설정대로 라이브 재생을 갱신한다(애니: 타이머 재시작 / 동영상: 재생 속도).
+    private void ApplyImageOutputTiming(PanelImage image)
+    {
+        if (image.Kind == MediaKind.Animated && image.Player != null)
+        {
+            image.FrameTimer?.Stop();
+            StartFrameAnimation(image);
+        }
+        else if (image.Kind == MediaKind.Video)
+        {
+            ApplyVideoSpeed(image);
+        }
+    }
+
+    // 동영상 재생 속도 = 원본길이 / 지정길이(지정 없으면 1배). NaturalDuration이 준비된 뒤에만 의미가 있다.
+    private static void ApplyVideoSpeed(PanelImage image)
+    {
+        var media = image.Media;
+        if (media == null)
+        {
+            return;
+        }
+
+        var natSec = media.NaturalDuration.HasTimeSpan ? media.NaturalDuration.TimeSpan.TotalSeconds : 0;
+        media.SpeedRatio = image.OutputDuration > 0 && natSec > 0 ? natSec / image.OutputDuration : 1.0;
     }
 
     private static bool IsVideoExtension(string ext) =>

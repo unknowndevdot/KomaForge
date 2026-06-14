@@ -81,6 +81,9 @@ public sealed class PanelImageData
     public string GradientColor { get; set; } = "#00FFFFFF";
     public double GradientStart { get; set; } = 40;
     public double GradientEnd { get; set; } = 60;
+    // 움직이는 이미지(애니/동영상)의 출력 설정. 0이면 원본 기준 자동. 라이브 재생·WebP 내보내기에 함께 적용.
+    public double OutputDuration { get; set; } // 한 바퀴 길이(초).
+    public double OutputFps { get; set; }      // 내보내기 출력 프레임레이트.
 }
 
 public sealed class SpeechBubbleData
@@ -161,4 +164,9 @@ public sealed class WindowSettings
     public Dictionary<string, string>? Shortcuts { get; set; }
     // 색 선택기에서 고른 최근 임의 색(최신순, hex).
     public List<string>? RecentColors { get; set; }
+    // 마지막 내보내기 설정(다음 실행에도 기억). ExportWebp=null이면 형식은 페이지 움직임 유무로 자동 선택.
+    public double ExportScale { get; set; } = 1;
+    public bool? ExportWebp { get; set; }
+    public bool ExportLossless { get; set; } = true;
+    public int ExportQuality { get; set; } = 90;
 }

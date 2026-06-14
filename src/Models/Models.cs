@@ -167,6 +167,9 @@ public sealed class PanelImage
     // 움직이는 이미지: 재생 타이머 + 프레임을 그때그때 디코드하는 스트리밍 플레이어.
     public DispatcherTimer? FrameTimer { get; set; }
     public AnimatedPlayer? Player { get; set; }
+    // 출력 설정(애니/동영상). 0이면 원본 기준 자동. OutputDuration=한 바퀴 길이(초), OutputFps=내보내기 프레임레이트.
+    public double OutputDuration { get; set; }
+    public double OutputFps { get; set; }
 
     // 제거 시 재생 자원을 정리한다(타이머·플레이어 코덱·동영상).
     public void StopPlayback()

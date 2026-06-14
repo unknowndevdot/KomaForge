@@ -337,10 +337,26 @@ public partial class MainWindow : Window
             return;
         }
 
+        // 마우스 클릭으로 전환했는지(키보드 페이지 넘김과 구분). 클릭이면 전환 뒤 포커스를 리스트로 되돌린다.
+        var fromClick = Mouse.LeftButton == MouseButtonState.Pressed
+            || (PageSectionBorder != null && PageSectionBorder.IsKeyboardFocusWithin);
+
         SaveCurrentPageState();
         _currentPageIndex = PageListBox.SelectedIndex;
         LoadPage(_pages[_currentPageIndex]);
         UpdateStatus($"{_pages[_currentPageIndex].Name} 페이지를 열었습니다.");
+
+        if (fromClick)
+        {
+            // 전환 중 포커스가 캔버스 등으로 옮겨가 페이지 하위 옵션이 사라지는 것을 막는다(컬링 이후에 실행).
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (PageSectionBorder != null && !PageSectionBorder.IsKeyboardFocusWithin)
+                {
+                    PageListBox.Focus();
+                }
+            }), System.Windows.Threading.DispatcherPriority.Input);
+        }
     }
 
     // --- 페이지 이름 인라인 편집(더블클릭 / F2) ---
@@ -998,8 +1014,8 @@ public partial class MainWindow : Window
     // 히스토리 타이머 틱: 변경분을 메모리에 기록한 뒤, 미저장분이 있으면 디바운스 조건에서 디스크에 flush한다.
     private void HistoryTick()
     {
-        // 동영상 프레임 캡처로 디스패처를 펌프하는 중이면(페이지 로드/내보내기 도중) 끼어들지 않는다.
-        if (_pumpingMedia)
+        // 동영상 프레임 캡처로 디스패처를 펌프하거나 내보내기 중이면 끼어들지 않는다(부분/잡음 상태 캡처 방지).
+        if (_pumpingMedia || _exporting)
         {
             return;
         }

@@ -121,6 +121,16 @@ public partial class MainWindow : Window
         ImageGradientStartText.Text = $"시작: {ImageGradientStartSlider.Value:0}%";
         ImageGradientEndText.Text = $"끝: {ImageGradientEndSlider.Value:0}%";
         UpdateImageGradientControls();
+        // 출력 섹션: 움직이는 이미지(애니/동영상)일 때만 노출. 값은 실효(지정 또는 원본) 출력값으로 채운다.
+        var moving = (image.Kind == MediaKind.Animated && image.Player != null && image.Player.FrameCount > 1)
+                     || image.Kind == MediaKind.Video;
+        ImageOutputGroup.Visibility = moving ? Visibility.Visible : Visibility.Collapsed;
+        if (moving)
+        {
+            var (effDur, effFps) = EffectiveOutput(image);
+            ImageOutputDurationBox.Text = $"{effDur:0.##}";
+            ImageOutputFpsBox.Text = $"{(int)Math.Round(effFps)}";
+        }
         _isLoadingInspector = false;
         UpdateSelectionLabels();
         UpdateSelectionVisuals();

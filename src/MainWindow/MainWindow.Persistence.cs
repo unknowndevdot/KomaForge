@@ -1,3 +1,4 @@
+using ImageMagick;
 using Microsoft.Win32;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -21,7 +22,77 @@ public partial class MainWindow : Window
     // 동영상 프레임 캡처로 디스패처를 펌프하는 동안엔 히스토리 타이머 등 콜백을 잠시 멈춘다(부분 상태 캡처 방지).
     private bool _pumpingMedia;
 
-    private void ExportPagesAsImages_Click(object sender, RoutedEventArgs e)
+    private enum ExportFormat { Png, Webp }
+
+    // 마지막 내보내기 설정(세션·세션 간 기억). _exportWebp=null이면 형식은 페이지 움직임 유무로 자동 선택.
+    // (투명 배경은 별도 옵션 없이 '페이지 배경색'을 투명으로 두면 그대로 투명 출력된다.)
+    private double _exportScale = 1;
+    private bool? _exportWebp;
+    private bool _exportLossless = true;
+    private int _exportQuality = 90;
+
+    private sealed class ExportSettings
+    {
+        public ExportFormat Format;
+        public double Scale = 1;
+        public bool Lossless;
+        public int Quality = 90;
+    }
+
+    private void ExportAllPages_Click(object sender, RoutedEventArgs e) => RunExport(currentPageOnly: false);
+    private void ExportCurrentPage_Click(object sender, RoutedEventArgs e) => RunExport(currentPageOnly: true);
+
+    // 진행률·취소 창. 동기 루프 중 Report로 갱신하며, 닫기/취소 버튼은 Cancelled를 세운다.
+    private sealed class ExportProgress
+    {
+        public Window Window = null!;
+        public ProgressBar Bar = null!;
+        public TextBlock Label = null!;
+        public bool Cancelled;
+
+        // 진행 텍스트·막대 갱신 후 디스패처를 한 번 펌프해 창을 다시 그리고 취소 클릭을 처리한다.
+        public void Report(string text, double fraction)
+        {
+            Label.Text = text;
+            Bar.Value = Math.Clamp(fraction, 0, 1);
+            var frame = new DispatcherFrame();
+            Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() => frame.Continue = false));
+            Dispatcher.PushFrame(frame);
+        }
+    }
+
+    private ExportProgress CreateExportProgress(string title)
+    {
+        var p = new ExportProgress();
+        var dark = new SolidColorBrush(Color.FromRgb(0x20, 0x21, 0x24));
+        var root = new StackPanel { Margin = new Thickness(16), Width = 300 };
+        p.Label = new TextBlock { Text = "준비 중…", Foreground = dark, Margin = new Thickness(0, 0, 0, 8), TextWrapping = TextWrapping.Wrap };
+        p.Bar = new ProgressBar { Height = 16, Minimum = 0, Maximum = 1, Value = 0 };
+        var cancel = new Button { Content = "취소", MinWidth = 72, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
+        cancel.Click += (_, _) => p.Cancelled = true;
+        root.Children.Add(p.Label);
+        root.Children.Add(p.Bar);
+        root.Children.Add(cancel);
+
+        p.Window = new Window
+        {
+            Title = title,
+            SizeToContent = SizeToContent.WidthAndHeight,
+            ResizeMode = ResizeMode.NoResize,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Owner = this,
+            ShowInTaskbar = false,
+            Background = (Brush)FindResource("WindowBackgroundBrush"),
+            Content = root
+        };
+        p.Window.Closing += (_, _) => p.Cancelled = true; // 창 닫기 = 취소.
+        p.Window.Show();
+        return p;
+    }
+
+    // 내보내기 공통 흐름. 형식(PNG 정지 / WebP 움직임)은 설정 창에서 고른다.
+    // currentPageOnly=false면 전체 페이지(폴더에 페이지별 파일), true면 현재 페이지 한 파일.
+    private void RunExport(bool currentPageOnly)
     {
         if (_pages.Count == 0)
         {
@@ -34,95 +105,531 @@ public partial class MainWindow : Window
             return;
         }
 
-        // 현재 편집 중인 페이지 상태를 먼저 저장한다.
         SaveCurrentPageState();
 
-        // 내보내기 설정 창(목표 해상도 등). 취소하면 중단.
-        var options = ShowExportDialog(_pageWidth, _pageHeight);
-        if (options == null)
+        // 길이·FPS는 각 이미지의 '출력' 설정대로 자동 적용된다(설정 창에는 형식·배수·품질만).
+        var settings = ShowExportDialog();
+        if (settings == null)
         {
             return;
         }
 
-        var (scaleX, scaleY) = options.Value;
+        var webp = settings.Format == ExportFormat.Webp;
+        var ext = webp ? "webp" : "png";
+        var originalIndex = _currentPageIndex;
 
-        var dialog = new OpenFolderDialog
+        if (currentPageOnly)
         {
-            Title = "페이지 이미지를 저장할 폴더 선택"
-        };
+            var save = new SaveFileDialog
+            {
+                Title = "현재 페이지 내보내기",
+                Filter = webp ? "WebP 이미지 (*.webp)|*.webp" : "PNG 이미지 (*.png)|*.png",
+                FileName = $"{_currentPageIndex + 1:D3}_{SanitizeFileName(_pages[_currentPageIndex].Name)}.{ext}"
+            };
+            if (save.ShowDialog(this) != true)
+            {
+                return;
+            }
 
+            var progress = webp ? CreateExportProgress("내보내는 중…") : null; // PNG 한 장은 즉시라 진행창 생략.
+            try
+            {
+                _exporting = true;
+                Mouse.OverrideCursor = Cursors.Wait;
+                ClearSelection();
+                if (webp)
+                {
+                    WaitForVideosReady(); // 동영상 길이가 준비된 뒤 출력 길이를 계산.
+                    var (dur, fps) = ComputeAnimationDefaults(); // 현재 페이지 이미지들의 출력 설정에서 자동 도출.
+                    var frames = RenderCurrentPageAnimation(save.FileName, (settings.Scale, fps, dur, settings.Lossless, settings.Quality),
+                        (f, total) => { progress!.Report($"프레임 {f + 1}/{total}", (double)(f + 1) / total); return !progress.Cancelled; });
+                    UpdateStatus(frames < 0 ? "내보내기를 취소했습니다." : $"움직이는 WebP로 내보냈습니다 ({frames}프레임): {save.FileName}");
+                }
+                else
+                {
+                    ExportPageToPng(save.FileName, settings.Scale);
+                    UpdateStatus($"이미지로 내보냈습니다: {save.FileName}");
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, $"내보내지 못했습니다.\n\n{ex.Message}", "오류", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                progress?.Window.Close();
+                LoadPage(_pages[_currentPageIndex]); // 라이브 상태 복원(타이머·재생 재개).
+                Mouse.OverrideCursor = null;
+                _exporting = false;
+            }
+
+            return;
+        }
+
+        var dialog = new OpenFolderDialog { Title = "페이지를 저장할 폴더 선택" };
         if (dialog.ShowDialog(this) != true)
         {
             return;
         }
 
         var folder = dialog.FolderName;
-        var originalIndex = _currentPageIndex;
+        var total = _pages.Count;
         var exported = 0;
-
+        var failed = new List<string>();
+        var cancelled = false;
+        var progressAll = CreateExportProgress("내보내는 중…");
         try
         {
             _exporting = true;
             Mouse.OverrideCursor = Cursors.Wait;
             ClearSelection();
 
-            for (var i = 0; i < _pages.Count; i++)
+            for (var i = 0; i < total; i++)
             {
-                _currentPageIndex = i;
-                LoadPage(_pages[i]);
-                ClearSelection();             // 선택 UI(핸들/박스)가 결과에 안 나오도록.
-                PageSurface.UpdateLayout();
-
-                // 동영상은 RenderTargetBitmap이 못 잡으므로 첫 프레임 스틸을 임시로 얹는다.
-                // (움직이는 gif/webp는 페이지를 새로 로드하므로 자연히 첫 프레임 상태다.)
-                var stills = AddVideoStillsForExport();
-                PageSurface.UpdateLayout();
-
-                var bitmap = RenderPageToBitmap(scaleX, scaleY);
-
-                foreach (var (layer, temp) in stills)
+                if (progressAll.Cancelled)
                 {
-                    layer.Children.Remove(temp);
+                    break;
                 }
 
-                var fileName = $"{i + 1:D3}_{SanitizeFileName(_pages[i].Name)}.png";
-                var path = System.IO.Path.Combine(folder, fileName);
-                SavePng(bitmap, path);
-                exported++;
+                progressAll.Report($"페이지 {i + 1}/{total}", (double)i / total);
+
+                // 한 페이지 실패가 전체를 중단시키지 않도록 페이지 단위로 예외를 가둔다.
+                try
+                {
+                    _currentPageIndex = i;
+                    LoadPage(_pages[i]);
+                    ClearSelection();
+                    PageSurface.UpdateLayout();
+
+                    var path = System.IO.Path.Combine(folder, $"{i + 1:D3}_{SanitizeFileName(_pages[i].Name)}.{ext}");
+                    if (webp)
+                    {
+                        WaitForVideosReady(); // 페이지 로드 직후 동영상 길이가 준비되길 기다린 뒤 계산.
+                        var (pageDur, pageFps) = ComputeAnimationDefaults(); // 각 페이지의 출력 설정대로.
+                        var pageIndex = i;
+                        var frames = RenderCurrentPageAnimation(path, (settings.Scale, pageFps, pageDur, settings.Lossless, settings.Quality),
+                            (f, fc) => { progressAll.Report($"페이지 {pageIndex + 1}/{total} · 프레임 {f + 1}/{fc}", (pageIndex + (double)(f + 1) / fc) / total); return !progressAll.Cancelled; });
+                        if (frames < 0)
+                        {
+                            break; // 취소(렌더 중단).
+                        }
+                    }
+                    else
+                    {
+                        ExportPageToPng(path, settings.Scale);
+                    }
+                    exported++;
+                }
+                catch (Exception ex)
+                {
+                    failed.Add($"{i + 1}. {_pages[i].Name}: {ex.Message}");
+                }
             }
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(this, $"이미지를 내보내지 못했습니다.\n\n{ex.Message}", "오류", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
-            // 원래 보던 페이지로 복원.
+            cancelled = progressAll.Cancelled; // 닫기 전에 실제 취소 상태를 캡처(Close가 Closing→Cancelled를 세움).
+            progressAll.Window.Close();
             _currentPageIndex = Math.Clamp(originalIndex, 0, _pages.Count - 1);
             LoadPage(_pages[_currentPageIndex]);
             Mouse.OverrideCursor = null;
             _exporting = false;
         }
 
-        if (exported > 0)
+        if (cancelled)
         {
-            UpdateStatus($"{exported}개 페이지를 이미지로 내보냈습니다: {folder}");
+            UpdateStatus($"내보내기를 취소했습니다 ({exported}/{total} 완료): {folder}");
+        }
+        else if (failed.Count > 0)
+        {
+            UpdateStatus($"{exported}/{total} 페이지 완료, {failed.Count}개 실패: {folder}");
+            MessageBox.Show(this, "다음 페이지를 내보내지 못했습니다:\n\n" + string.Join("\n", failed), "일부 실패", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        else
+        {
+            UpdateStatus($"{exported}개 페이지를 내보냈습니다: {folder}");
         }
     }
 
-    // 내보내기 설정 창. 배수(게이지)를 받아 (가로배율, 세로배율)을 돌려준다. 취소하면 null.
-    // 페이지마다 크기가 달라 절대 해상도가 아닌 '원본 크기 × 배수'(균일 배율)로 내보낸다.
-    // 세로 스택 레이아웃이라 이후 항목(포맷·배경·여백 등)을 아래에 덧붙이기 쉽다.
-    private (double ScaleX, double ScaleY)? ShowExportDialog(double refW, double refH)
+    // 현재 페이지를 PNG 한 장으로 저장(동영상은 첫 프레임 스틸을 임시 합성).
+    private void ExportPageToPng(string path, double scale)
     {
-        var nativeW = Math.Max(1, (int)Math.Round(refW));
-        var nativeH = Math.Max(1, (int)Math.Round(refH));
-        (double ScaleX, double ScaleY)? result = null;
+        var stills = AddVideoStillsForExport();
+        PageSurface.UpdateLayout();
+        var bitmap = RenderPageToBitmap(scale, scale);
+        foreach (var (layer, temp) in stills)
+        {
+            layer.Children.Remove(temp);
+        }
+        SavePng(bitmap, path);
+    }
+
+    // 현재 페이지에 움직이는 요소(애니/동영상)가 있는지 — 내보내기 형식 기본값 결정용.
+    private bool HasMovingContent()
+    {
+        foreach (var panel in _panels)
+        {
+            foreach (var image in panel.Images)
+            {
+                if ((image.Kind == MediaKind.Animated && image.Player != null && image.Player.FrameCount > 1)
+                    || image.Kind == MediaKind.Video)
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    // === 현재 페이지를 움직이는 WebP로 내보내기 ===
+
+    private sealed class AnimExportContext
+    {
+        public Image Target = null!;
+        public BitmapSource[] Frames = System.Array.Empty<BitmapSource>();
+        public int[] Delays = System.Array.Empty<int>();
+        public double Total;      // 원본 총 길이 ms.
+        public double OutDurMs;   // 실효 출력 길이 ms.
+        public bool Override;     // 출력 길이를 지정했는가(지정 시 균등 분배).
+    }
+
+    private sealed class VideoExportContext
+    {
+        public VideoFrameReader? Reader; // Media Foundation(우선). null이면 아래 Player로 폴백.
+        public MediaPlayer? Player;
+        public Grid Layer = null!;
+        public Image Overlay = null!;
+        public double NatDurMs;
+        public double OutDurMs; // 실효 출력 길이 ms(이 동안 영상 한 바퀴).
+        public int W;
+        public int H;
+    }
+
+    // N = round(duration*fps) 프레임을, 각 움직이는 요소를 시간 t의 상태로 맞춰 렌더해 애니 WebP로 인코딩한다.
+    // onFrame(완료프레임, 총프레임): 진행률 보고 + 취소 신호(false 반환 시 중단). 취소되면 -1을 돌려준다.
+    private int RenderCurrentPageAnimation(string outputPath, (double Scale, double Fps, double Duration, bool Lossless, int Quality) o, Func<int, int, bool>? onFrame = null)
+    {
+        const int maxFrames = 300;
+        var fps = Math.Clamp(o.Fps, 1, 60);
+        var duration = Math.Clamp(o.Duration, 0.1, 60);
+        var scale = o.Scale;
+        var requested = Math.Max(1, (int)Math.Round(duration * fps));
+        var n = Math.Min(maxFrames, requested);
+        var delayCs = Math.Max(1, (int)Math.Round(100.0 / fps));
+
+        // 움직이는 요소 수집(애니: 전 프레임 미리 디코드 / 동영상: 플레이어+오버레이 준비).
+        var anims = new List<AnimExportContext>();
+        var videos = new List<VideoExportContext>();
+        foreach (var panel in _panels)
+        {
+            foreach (var image in panel.Images)
+            {
+                if (image.Kind == MediaKind.Animated && image.Player != null && image.Image != null)
+                {
+                    image.FrameTimer?.Stop(); // 라이브 타이머가 Source를 덮어쓰지 않게.
+                    var player = image.Player;
+                    var fc = Math.Max(1, player.FrameCount);
+                    var ctx = new AnimExportContext { Target = image.Image, Frames = new BitmapSource[fc], Delays = new int[fc] };
+                    for (var i = 0; i < fc; i++)
+                    {
+                        ctx.Frames[i] = player.DecodeFrame(i); // 순차 디코드(델타 프레임 정확). 1회만.
+                        ctx.Delays[i] = player.DelayMs(i);
+                        ctx.Total += ctx.Delays[i];
+                    }
+                    ctx.OutDurMs = EffectiveOutput(image).Duration * 1000.0;
+                    ctx.Override = image.OutputDuration > 0; // 지정 시 균등 분배.
+                    anims.Add(ctx);
+                }
+                else if (image.Kind == MediaKind.Video)
+                {
+                    videos.Add(SetupVideoExport(image));
+                }
+            }
+        }
+
+        var hasMotion = anims.Count > 0 || videos.Exists(v => (v.Reader != null || v.Player != null) && v.NatDurMs > 0);
+        var frameCount = hasMotion ? n : 1; // 움직이는 요소가 없으면 정지 1프레임.
+
+        using var collection = new MagickImageCollection();
+        try
+        {
+            for (var f = 0; f < frameCount; f++)
+            {
+                if (onFrame != null && !onFrame(f, frameCount))
+                {
+                    return -1; // 사용자 취소(파일 미기록, finally가 플레이어 정리).
+                }
+
+                var tMs = f / fps * 1000.0;
+
+                foreach (var a in anims)
+                {
+                    a.Target.Source = a.Frames[FrameIndexAtTime(a, tMs)];
+                }
+
+                foreach (var v in videos)
+                {
+                    // 출력 길이(OutDurMs) 동안 영상이 한 바퀴 돌도록 소스 위치를 리타이밍한다.
+                    var pos = v.NatDurMs > 0 && v.OutDurMs > 0 ? tMs % v.OutDurMs / v.OutDurMs * v.NatDurMs : tMs;
+
+                    if (v.Reader != null)
+                    {
+                        // Media Foundation: 그 시각 프레임을 직접 디코드(펌프 없음, 프레임 정확).
+                        var bmp = v.Reader.GetFrame(pos);
+                        if (bmp != null)
+                        {
+                            v.Overlay.Source = bmp;
+                        }
+                        continue;
+                    }
+
+                    if (v.Player == null)
+                    {
+                        continue; // 폴백 정지본 유지.
+                    }
+
+                    // 폴백: MediaPlayer 탐색 + 고정 펌프.
+                    v.Player.Position = TimeSpan.FromMilliseconds(pos);
+                    v.Player.Play();
+                    v.Player.Pause();
+                    PumpUntil(() => false, 200); // 탐색·디코드 시간. 검은 프레임 나오면 ↑.
+
+                    var visual = new DrawingVisual();
+                    using (var dc = visual.RenderOpen())
+                    {
+                        dc.DrawVideo(v.Player, new Rect(0, 0, v.W, v.H));
+                    }
+                    var vrtb = new RenderTargetBitmap(v.W, v.H, 96, 96, PixelFormats.Pbgra32);
+                    vrtb.Render(visual);
+                    vrtb.Freeze();
+                    v.Overlay.Source = vrtb;
+                }
+
+                PageSurface.UpdateLayout();
+                var frame = RenderPageToBitmap(scale, scale);
+                var mi = FrameToMagickImage(frame);
+                mi.AnimationDelay = (uint)delayCs;
+                mi.AnimationTicksPerSecond = 100;
+                collection.Add(mi);
+            }
+
+            if (collection.Count == 0)
+            {
+                return 0; // 방어: 프레임이 하나도 없으면 기록하지 않는다.
+            }
+
+            collection[0].AnimationIterations = 0; // 무한 반복.
+            collection.Coalesce();
+            foreach (var img in collection)
+            {
+                if (o.Lossless)
+                {
+                    img.Settings.SetDefine(MagickFormat.WebP, "lossless", "true");
+                }
+                else
+                {
+                    img.Quality = (uint)Math.Clamp(o.Quality, 1, 100);
+                }
+            }
+            collection.Write(outputPath, MagickFormat.WebP);
+            return collection.Count;
+        }
+        finally
+        {
+            // 동영상 자원 정리(오버레이·라이브 패널은 호출부의 LoadPage 리로드가 정리한다).
+            foreach (var v in videos)
+            {
+                try { v.Reader?.Dispose(); } catch { /* 무시 */ }
+                try { v.Player?.Close(); } catch { /* 무시 */ }
+            }
+        }
+    }
+
+    // 동영상 MediaElement의 NaturalDuration(출력 길이 계산에 필요)이 준비될 때까지 짧게 대기한다.
+    // 페이지를 막 로드한 직후엔 비동기 로딩이 끝나지 않아 길이가 0으로 잡힐 수 있다.
+    private void WaitForVideosReady()
+    {
+        bool AllReady()
+        {
+            foreach (var panel in _panels)
+            {
+                foreach (var image in panel.Images)
+                {
+                    if (image.Kind == MediaKind.Video && image.Media != null && !image.Media.NaturalDuration.HasTimeSpan)
+                    {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        if (AllReady())
+        {
+            return;
+        }
+
+        _pumpingMedia = true;
+        try { PumpUntil(AllReady, 3000); }
+        finally { _pumpingMedia = false; }
+    }
+
+    // 페이지의 움직이는 요소에서 출력 길이(초)·FPS를 도출한다 — 각 이미지의 '출력' 설정(지정 또는 원본) 기준.
+    // 길이 = 가장 긴 요소(한 바퀴 다 재생) / FPS = 가장 높은 요소. 움직이는 요소가 없으면 (2초, 12fps).
+    private (double Duration, double Fps) ComputeAnimationDefaults()
+    {
+        var durations = new List<double>();
+        var fpsList = new List<double>();
+
+        foreach (var panel in _panels)
+        {
+            foreach (var image in panel.Images)
+            {
+                var moving = (image.Kind == MediaKind.Animated && image.Player != null && image.Player.FrameCount > 1)
+                             || image.Kind == MediaKind.Video;
+                if (!moving)
+                {
+                    continue;
+                }
+
+                var (d, f) = EffectiveOutput(image);
+                durations.Add(d);
+                fpsList.Add(f);
+            }
+        }
+
+        var duration = durations.Count > 0 ? Math.Clamp(Math.Round(durations.Max(), 2), 0.1, 60) : 2.0;
+        var fps = fpsList.Count > 0 ? Math.Clamp(Math.Round(fpsList.Max()), 1, 60) : 12.0;
+        return (duration, fps);
+    }
+
+    // 시간 t(ms)에 해당하는 애니 프레임 인덱스. 출력 길이를 지정하면 균등 분배, 아니면 원본 프레임별 지연대로(원본 길이로 루프).
+    private static int FrameIndexAtTime(AnimExportContext a, double tMs)
+    {
+        if (a.Frames.Length <= 1)
+        {
+            return 0;
+        }
+
+        if (a.Override && a.OutDurMs > 0)
+        {
+            var tau = tMs % a.OutDurMs;
+            return Math.Clamp((int)(tau / a.OutDurMs * a.Frames.Length), 0, a.Frames.Length - 1);
+        }
+
+        if (a.Total <= 0)
+        {
+            return 0;
+        }
+
+        var m = tMs % a.Total;
+        double acc = 0;
+        for (var i = 0; i < a.Delays.Length; i++)
+        {
+            acc += a.Delays[i];
+            if (m < acc)
+            {
+                return i;
+            }
+        }
+        return a.Frames.Length - 1;
+    }
+
+    // 동영상 한 개의 내보내기 컨텍스트 준비: 레이어에 오버레이 삽입 + 탐색용 MediaPlayer 열기(실패 시 정지본 폴백).
+    private VideoExportContext SetupVideoExport(PanelImage image)
+    {
+        var path = ResolveProjectPath(image.Path);
+        var overlay = new Image
+        {
+            Stretch = Stretch.Uniform,
+            Width = image.Content.Width,
+            Height = image.Content.Height,
+            RenderTransform = image.Content.RenderTransform, // 동영상과 같은 변환(확대/이동) 공유.
+            RenderTransformOrigin = new Point(0.5, 0.5),
+            IsHitTestVisible = false
+        };
+        RenderOptions.SetBitmapScalingMode(overlay, BitmapScalingMode.HighQuality);
+        var insertIndex = Math.Max(0, image.Layer.Children.Count - 1); // 선택 테두리 아래, 동영상 위.
+        image.Layer.Children.Insert(insertIndex, overlay);
+
+        var ctx = new VideoExportContext { Layer = image.Layer, Overlay = overlay };
+        var natDurMs = image.Media != null && image.Media.NaturalDuration.HasTimeSpan
+            ? image.Media.NaturalDuration.TimeSpan.TotalMilliseconds : 0;
+        ctx.OutDurMs = EffectiveOutput(image).Duration * 1000.0; // 출력 길이대로 리타이밍.
+
+        // 1순위: Media Foundation SourceReader(프레임 정확·빠름, 펌프 불필요).
+        var reader = VideoFrameReader.TryCreate(path);
+        if (reader != null)
+        {
+            ctx.Reader = reader;
+            ctx.W = reader.Width;
+            ctx.H = reader.Height;
+            ctx.NatDurMs = natDurMs; // 길이는 라이브 MediaElement에서(이미 준비됨).
+            return ctx;
+        }
+
+        // 2순위(폴백): MediaPlayer 탐색 + 고정 펌프.
+        try
+        {
+            var player = new MediaPlayer { Volume = 0, ScrubbingEnabled = true };
+            var opened = false;
+            var failed = false;
+            player.MediaOpened += (_, _) => opened = true;
+            player.MediaFailed += (_, _) => failed = true;
+            player.Open(new Uri(path, UriKind.Absolute));
+            if (PumpUntil(() => opened || failed, 3000) && !failed
+                && player.NaturalVideoWidth > 0 && player.NaturalVideoHeight > 0)
+            {
+                ctx.Player = player;
+                ctx.W = player.NaturalVideoWidth;
+                ctx.H = player.NaturalVideoHeight;
+                ctx.NatDurMs = player.NaturalDuration.HasTimeSpan ? player.NaturalDuration.TimeSpan.TotalMilliseconds : 0;
+            }
+            else
+            {
+                try { player.Close(); } catch { /* 무시 */ }
+            }
+        }
+        catch
+        {
+            ctx.Player = null;
+        }
+
+        if (ctx.Player == null)
+        {
+            // 탐색 불가: 첫 프레임 정지본으로 채운다(움직이진 않지만 비지 않게).
+            var still = CaptureVideoFirstFrame(path) ?? GetVideoStillFrame(path);
+            if (still != null)
+            {
+                overlay.Source = still;
+            }
+        }
+
+        return ctx;
+    }
+
+    // WPF 비트맵 → MagickImage. PNG 바이트 경유라 BGRA/프리멀티플라이 알파가 안전하게 변환된다.
+    private static MagickImage FrameToMagickImage(BitmapSource frame)
+    {
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(frame));
+        using var ms = new MemoryStream();
+        encoder.Save(ms);
+        ms.Position = 0;
+        return new MagickImage(ms);
+    }
+
+    // 통합 내보내기 설정 창. 형식(PNG/WebP)·배수, WebP면 무손실·품질을 받아 ExportSettings로 돌려준다.
+    // 취소하면 null. 길이·FPS는 각 이미지의 '출력' 설정대로 자동 적용되므로 여기엔 없다.
+    // 현재 페이지에 움직이는 요소가 있으면 WebP를 기본 선택한다.
+    private ExportSettings? ShowExportDialog()
+    {
+        ExportSettings? result = null;
 
         var dialog = new Window
         {
-            Title = "이미지로 내보내기",
-            Width = 420,
+            Title = "내보내기",
+            Width = 440,
             SizeToContent = SizeToContent.Height,
             ResizeMode = ResizeMode.NoResize,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
@@ -134,54 +641,79 @@ public partial class MainWindow : Window
         var gray = new SolidColorBrush(Color.FromRgb(0x77, 0x72, 0x68));
         var root = new StackPanel { Margin = new Thickness(16) };
 
-        root.Children.Add(new TextBlock
-        {
-            Text = "배수", FontWeight = FontWeights.Bold, Foreground = dark, Margin = new Thickness(0, 0, 0, 6)
-        });
-        root.Children.Add(new TextBlock
-        {
-            Text = "원본 페이지 크기 × 배수로 내보냅니다. 페이지마다 크기가 달라도 같은 배수가 적용됩니다.",
-            Foreground = gray, Margin = new Thickness(0, 0, 0, 10), TextWrapping = TextWrapping.Wrap
-        });
+        // 형식(PNG 정지 / WebP 움직임).
+        root.Children.Add(new TextBlock { Text = "형식", FontWeight = FontWeights.Bold, Foreground = dark, Margin = new Thickness(0, 0, 0, 6) });
+        var pngRadio = new RadioButton { Content = "PNG (정지 이미지)", GroupName = "fmt", Foreground = dark, Margin = new Thickness(0, 0, 0, 2) };
+        var webpRadio = new RadioButton { Content = "WebP (움직이는 이미지)", GroupName = "fmt", Foreground = dark };
+        // 형식 기본값: 지난번 선택 기억(없으면 페이지 움직임 유무로 자동).
+        var defaultWebp = _exportWebp ?? HasMovingContent();
+        pngRadio.IsChecked = !defaultWebp;
+        webpRadio.IsChecked = defaultWebp;
+        root.Children.Add(pngRadio);
+        root.Children.Add(webpRadio);
 
-        var valueLabel = new TextBlock
+        // 배수.
+        root.Children.Add(new TextBlock { Text = "배수", FontWeight = FontWeights.Bold, Foreground = dark, Margin = new Thickness(0, 12, 0, 6) });
+        var scaleLabel = new TextBlock { Foreground = dark, FontWeight = FontWeights.Bold, MinWidth = 52, TextAlignment = System.Windows.TextAlignment.Right, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0) };
+        var scaleSlider = new Slider { Minimum = 1, Maximum = 4, Value = Math.Clamp(_exportScale, 1, 4), TickFrequency = 0.25, IsSnapToTickEnabled = true, VerticalAlignment = VerticalAlignment.Center };
+        var scaleRow = new DockPanel();
+        DockPanel.SetDock(scaleLabel, Dock.Right);
+        scaleRow.Children.Add(scaleLabel);
+        scaleRow.Children.Add(scaleSlider);
+        root.Children.Add(scaleRow);
+
+        // 애니메이션(WebP) 전용: 무손실/품질 + 길이·FPS 안내. 형식이 PNG면 숨긴다.
+        var animPanel = new StackPanel { Margin = new Thickness(0, 12, 0, 0) };
+        var losslessCheck = new CheckBox { Content = "무손실", IsChecked = _exportLossless, Foreground = dark, VerticalAlignment = VerticalAlignment.Center };
+        var qualityBox = new TextBox { Text = _exportQuality.ToString(), Width = 56, MinHeight = 24, VerticalContentAlignment = VerticalAlignment.Center };
+        var qualityLabel = new TextBlock { Text = "품질", Foreground = dark, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(16, 0, 6, 0) };
+        var qualRow = new StackPanel { Orientation = Orientation.Horizontal };
+        qualRow.Children.Add(losslessCheck);
+        qualRow.Children.Add(qualityLabel);
+        qualRow.Children.Add(qualityBox);
+        animPanel.Children.Add(qualRow);
+        animPanel.Children.Add(new TextBlock
         {
-            Foreground = dark, FontWeight = FontWeights.Bold, MinWidth = 52,
-            TextAlignment = TextAlignment.Right, VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(10, 0, 0, 0)
-        };
-        var slider = new Slider
-        {
-            Minimum = 1, Maximum = 4, Value = 1,
-            TickFrequency = 0.25, IsSnapToTickEnabled = true,
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        var sizeHint = new TextBlock { Foreground = gray, Margin = new Thickness(0, 8, 0, 0), TextWrapping = TextWrapping.Wrap };
+            Text = "길이·FPS는 각 이미지의 '출력' 설정대로 적용됩니다(이미지 선택 시 인스펙터에서 지정).",
+            Foreground = gray, Margin = new Thickness(0, 12, 0, 0), TextWrapping = TextWrapping.Wrap
+        });
+        root.Children.Add(animPanel);
+
+        int ParseI(TextBox b, int def) => int.TryParse(b.Text, out var v) ? v : def;
 
         void Refresh()
         {
-            var s = slider.Value;
-            valueLabel.Text = $"{s:0.##}×";
-            sizeHint.Text = $"현재 페이지: {(int)Math.Round(nativeW * s)} × {(int)Math.Round(nativeH * s)}px";
+            scaleLabel.Text = $"{scaleSlider.Value:0.##}×";
+            animPanel.Visibility = webpRadio.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+            qualityLabel.Opacity = losslessCheck.IsChecked == true ? 0.4 : 1.0;
+            qualityBox.IsEnabled = losslessCheck.IsChecked != true;
         }
 
-        slider.ValueChanged += (_, _) => Refresh();
+        pngRadio.Checked += (_, _) => Refresh();
+        webpRadio.Checked += (_, _) => Refresh();
+        scaleSlider.ValueChanged += (_, _) => Refresh();
+        losslessCheck.Checked += (_, _) => Refresh();
+        losslessCheck.Unchecked += (_, _) => Refresh();
         Refresh();
-
-        var sliderRow = new DockPanel(); // 오른쪽=배수 값, 나머지 영역=슬라이더.
-        DockPanel.SetDock(valueLabel, Dock.Right);
-        sliderRow.Children.Add(valueLabel);
-        sliderRow.Children.Add(slider);
-        root.Children.Add(sliderRow);
-        root.Children.Add(sizeHint);
 
         var cancelBtn = new Button { Content = "취소", MinWidth = 72 };
         cancelBtn.Click += (_, _) => dialog.Close();
         var okBtn = new Button { Content = "내보내기", MinWidth = 72, Margin = new Thickness(0, 0, 8, 0) };
         okBtn.Click += (_, _) =>
         {
-            var s = slider.Value;
-            result = (s, s); // 균일 배수.
+            var webpSel = webpRadio.IsChecked == true;
+            result = new ExportSettings
+            {
+                Format = webpSel ? ExportFormat.Webp : ExportFormat.Png,
+                Scale = scaleSlider.Value,
+                Lossless = losslessCheck.IsChecked == true,
+                Quality = Math.Clamp(ParseI(qualityBox, 90), 1, 100)
+            };
+            // 다음 번 기본값으로 기억(세션·세션 간).
+            _exportWebp = webpSel;
+            _exportScale = result.Scale;
+            _exportLossless = result.Lossless;
+            _exportQuality = result.Quality;
             dialog.DialogResult = true;
         };
 
@@ -198,6 +730,7 @@ public partial class MainWindow : Window
     }
 
     // 현재 페이지를 비트맵으로 렌더한다. scaleX/scaleY로 출력 해상도를 키운다(1=페이지 픽셀 그대로, 슈퍼샘플링).
+    // 페이지 배경색이 투명(알파 0)이면 그 영역은 자연히 투명으로 남는다(Pbgra32).
     private RenderTargetBitmap RenderPageToBitmap(double scaleX, double scaleY)
     {
         // 매우 큰 페이지 × 배수가 메모리를 폭발시키지 않도록 출력 한 변을 16000px로 제한한다.
@@ -216,8 +749,9 @@ public partial class MainWindow : Window
         var visual = new DrawingVisual();
         using (var context = visual.RenderOpen())
         {
-            // 배경을 직접 그린다(페이지별 검/흰). PageSurface는 PageFrame 테두리(1px)만큼 오프셋이 있어
+            // 배경을 직접 그린다(페이지별 색). PageSurface는 PageFrame 테두리(1px)만큼 오프셋이 있어
             // VisualBrush로 쓰면 좌/상에 1px 투명 여백이 생기므로, 그리드 원점(0,0)에 있는 PanelCanvas를 렌더한다.
+            // 배경색이 투명(알파 0)이면 칠해도 아무 효과가 없어 그 영역이 투명으로 남는다(= 투명 내보내기).
             var background = new SolidColorBrush(CurrentPageBackgroundColor());
             context.DrawRectangle(background, null, pageRect);
 

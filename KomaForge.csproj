@@ -14,8 +14,11 @@
     <Copyright>Copyright © 2026 unknowndevdot</Copyright>
     <RepositoryUrl>https://github.com/unknowndevdot/KomaForge</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
+    <!-- 단일 파일 퍼블리시 시 네이티브 DLL(SkiaSharp·Magick.NET)을 exe에 묻어 실행 시 임시 추출. -->
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="Magick.NET-Q8-x64" Version="14.14.0" />
     <PackageReference Include="SkiaSharp" Version="2.88.8" />
   </ItemGroup>
 </Project>

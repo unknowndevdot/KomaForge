@@ -401,6 +401,10 @@ public partial class MainWindow : Window
             _keepAspectRatio = settings.KeepAspectRatio;
             _autosaveDisabled = settings.AutosaveDisabled;
             _imageCacheLimitMb = settings.ImageCacheLimitMb < 0 ? 0 : settings.ImageCacheLimitMb;
+            _exportScale = settings.ExportScale > 0 ? settings.ExportScale : 1;
+            _exportWebp = settings.ExportWebp;
+            _exportLossless = settings.ExportLossless;
+            _exportQuality = settings.ExportQuality is >= 1 and <= 100 ? settings.ExportQuality : 90;
             _recentColors.Clear();
             if (settings.RecentColors != null)
             {
@@ -470,6 +474,10 @@ public partial class MainWindow : Window
                 KeepAspectRatio = _keepAspectRatio,
                 AutosaveDisabled = _autosaveDisabled,
                 ImageCacheLimitMb = _imageCacheLimitMb,
+                ExportScale = _exportScale,
+                ExportWebp = _exportWebp,
+                ExportLossless = _exportLossless,
+                ExportQuality = _exportQuality,
                 RecentColors = new List<string>(_recentColors),
                 Shortcuts = ExportShortcuts()
             };

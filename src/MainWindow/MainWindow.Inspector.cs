@@ -631,6 +631,19 @@ public partial class MainWindow : Window
         _selectedImage.PivotY = Math.Clamp(ParseDoubleOr(ImagePivotYBox.Text, 1), 0, 1);
     }
 
+    // 움직이는 이미지의 출력 시간(초)·FPS 변경. 빈/0이면 자동(원본 기준). 라이브 재생도 바로 반영.
+    private void ImageOutputBox_Changed(object sender, TextChangedEventArgs e)
+    {
+        if (_isLoadingInspector || _selectedImage == null)
+        {
+            return;
+        }
+
+        _selectedImage.OutputDuration = ParseDoubleOr(ImageOutputDurationBox.Text, 0) is var d && d > 0 ? d : 0;
+        _selectedImage.OutputFps = ParseDoubleOr(ImageOutputFpsBox.Text, 0) is var f && f > 0 ? f : 0;
+        ApplyImageOutputTiming(_selectedImage);
+    }
+
     private void ImageGradientComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         UpdateImageGradientControls();

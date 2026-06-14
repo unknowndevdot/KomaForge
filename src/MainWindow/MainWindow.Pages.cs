@@ -127,7 +127,9 @@ public partial class MainWindow : Window
         GradientDirection = image.GradientDirection.ToString(),
         GradientColor = ColorToHex(image.GradientColor),
         GradientStart = image.GradientStart,
-        GradientEnd = image.GradientEnd
+        GradientEnd = image.GradientEnd,
+        OutputDuration = image.OutputDuration,
+        OutputFps = image.OutputFps
     };
 
     private SpeechBubbleData CaptureBubbleData(SpeechBubble bubble)
@@ -272,7 +274,9 @@ public partial class MainWindow : Window
                     GradientDirection = image.GradientDirection,
                     GradientColor = image.GradientColor,
                     GradientStart = image.GradientStart,
-                    GradientEnd = image.GradientEnd
+                    GradientEnd = image.GradientEnd,
+                    OutputDuration = image.OutputDuration,
+                    OutputFps = image.OutputFps
                 });
             }
 
@@ -339,9 +343,12 @@ public partial class MainWindow : Window
         image.GradientColor = SafeColor(imageData.GradientColor);
         image.GradientStart = imageData.GradientStart;
         image.GradientEnd = imageData.GradientEnd;
+        image.OutputDuration = imageData.OutputDuration;
+        image.OutputFps = imageData.OutputFps;
         ApplyImageGradient(image);
         SetImageCrop(image, imageData.IsCropped);
         SetImageLocked(image, imageData.IsLocked);
+        ApplyImageOutputTiming(image); // 저장된 출력 설정대로 라이브 재생 타이밍 적용.
         return image;
     }
 

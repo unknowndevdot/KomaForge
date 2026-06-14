@@ -14,7 +14,8 @@
                 <MenuItem x:Name="SaveMenuItem" Header="저장" InputGestureText="Ctrl+S" Click="SaveMenuItem_Click" />
                 <MenuItem Header="다른 이름으로 저장..." Click="SaveProject_Click" />
                 <Separator />
-                <MenuItem Header="페이지 이미지로 내보내기..." Click="ExportPagesAsImages_Click" />
+                <MenuItem Header="전체 페이지 내보내기..." Click="ExportAllPages_Click" />
+                <MenuItem Header="현재 페이지 내보내기..." Click="ExportCurrentPage_Click" />
                 <Separator />
                 <MenuItem x:Name="PreferencesMenuItem" Header="환경설정..." InputGestureText="Ctrl+," Click="Preferences_Click" />
                 <Separator />
@@ -397,6 +398,22 @@
                             Value="60"
                             ValueChanged="ImageGradientSlider_ValueChanged"
                             Margin="0,0,0,2" />
+                    </StackPanel>
+                    </Border>
+
+                    <Border x:Name="ImageOutputGroup" Style="{StaticResource InspectorGroup}" Visibility="Collapsed">
+                    <StackPanel>
+                    <TextBlock Text="출력 (움직이는 이미지)" Style="{StaticResource GroupHeader}" />
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                        <TextBlock Text="시간(초)" Width="64" VerticalAlignment="Center" Foreground="#55514A" />
+                        <TextBox x:Name="ImageOutputDurationBox" Width="64" TextChanged="ImageOutputBox_Changed" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                        <TextBlock Text="FPS" Width="64" VerticalAlignment="Center" Foreground="#55514A" />
+                        <TextBox x:Name="ImageOutputFpsBox" Width="64" TextChanged="ImageOutputBox_Changed" />
+                    </StackPanel>
+                    <TextBlock Text="시간=한 바퀴 길이, FPS=내보내기 부드러움. 편집 미리보기·WebP 내보내기에 함께 적용됩니다."
+                               Foreground="#777268" TextWrapping="Wrap" Margin="0,2,0,0" />
                     </StackPanel>
                     </Border>
                     </StackPanel>
