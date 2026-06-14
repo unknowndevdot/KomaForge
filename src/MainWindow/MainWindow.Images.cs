@@ -16,6 +16,251 @@ namespace KomaForge;
 
 public partial class MainWindow : Window
 {
+    // --- 정지 이미지 디코드 캐시(경로 기준 LRU) ---
+    // 페이지를 넘길 때마다 같은 '정지' 이미지를 다시 디코드하지 않도록 결과를 경로별로 보관한다.
+    // 총 디코드 바이트가 한도를 넘으면 '가장 오래 안 쓴 것'부터 버린다(시간↔메모리 맞교환).
+    // 움직이는 gif/webp는 메모리가 커서 캐시 대상이 아니며, AnimatedPlayer로 재생하며 프레임마다 디코드한다.
+    private int _imageCacheLimitMb = 256; // 환경설정-일반에서 조절. 0이면 캐시 끔.
+    private readonly Dictionary<string, LinkedListNode<CacheEntry>> _imageCache = new();
+    private readonly LinkedList<CacheEntry> _imageCacheList = new(); // 앞=최근 사용, 뒤=오래됨.
+    private long _imageCacheBytes;
+    // 인접 페이지 예열 작업의 세대 번호. 페이지가 바뀌면 증가시켜 진행 중인 예열을 취소한다.
+    private volatile int _prefetchGen;
+    // 이미 예열 작업을 띄운 세대(같은 세대에 중복 작업이 생기지 않게 한다).
+    private int _prefetchStartedGen = -1;
+
+    private sealed class CacheEntry
+    {
+        public CacheEntry(string key, BitmapSource bitmap, long bytes, System.DateTime lastWriteUtc)
+        {
+            Key = key;
+            Bitmap = bitmap;
+            Bytes = bytes;
+            LastWriteUtc = lastWriteUtc;
+        }
+
+        public string Key;
+        public BitmapSource Bitmap;
+        public long Bytes;                  // 디코드 바이트(대략 W*H*4).
+        public System.DateTime LastWriteUtc; // 원본 파일 수정시각(파일 교체 감지용).
+    }
+
+    private long ImageCacheLimitBytes => (long)_imageCacheLimitMb * 1024 * 1024;
+
+    // 경로로 비트맵을 얻는다. 캐시에 최신본이 있으면 만들지 않고 재사용하고, 없으면 create로 만들어 캐시한다.
+    // 정지 이미지 디코드와 동영상 첫 프레임(포스터) 모두 이 한 곳을 거쳐 같은 LRU·한도를 공유한다.
+    private BitmapSource? GetOrCreateCachedBitmap(string path, Func<BitmapSource?> create)
+    {
+        System.DateTime writeUtc = default;
+        try { writeUtc = File.GetLastWriteTimeUtc(path); } catch { /* 접근 불가: 기본값으로 둔다 */ }
+        var key = path.ToLowerInvariant();
+
+        if (_imageCache.TryGetValue(key, out var node))
+        {
+            if (node.Value.LastWriteUtc == writeUtc)
+            {
+                _imageCacheList.Remove(node);     // 최근 사용으로 갱신(MRU = 맨 앞).
+                _imageCacheList.AddFirst(node);
+                return node.Value.Bitmap;
+            }
+
+            RemoveImageCacheNode(node); // 파일이 바뀜(stale) → 버리고 새로 만든다.
+        }
+
+        var bitmap = create();
+        if (bitmap != null)
+        {
+            AddToImageCache(key, bitmap, FrameBytes(bitmap), writeUtc);
+        }
+
+        return bitmap;
+    }
+
+    // 정지 이미지: 캐시 미스면 디코드한다(항상 비트맵을 돌려준다).
+    private BitmapSource GetOrDecodeStaticBitmap(string path)
+        => GetOrCreateCachedBitmap(path, () => LoadStaticBitmap(path))!;
+
+    private static long FrameBytes(BitmapSource bmp) => (long)bmp.PixelWidth * bmp.PixelHeight * 4; // Pbgra32 기준 근사.
+
+    private void AddToImageCache(string key, BitmapSource bitmap, long bytes, System.DateTime lastWriteUtc)
+        => InsertCacheNode(key, bitmap, bytes, lastWriteUtc, atFront: true);
+
+    // 캐시에 노드를 삽입한다. atFront=true면 MRU(맨 앞), false면 LRU(맨 뒤=가장 먼저 버려짐, 예열용).
+    private void InsertCacheNode(string key, BitmapSource bitmap, long bytes, System.DateTime lastWriteUtc, bool atFront)
+    {
+        if (ImageCacheLimitBytes <= 0)
+        {
+            return; // 캐시 꺼짐.
+        }
+
+        if (_imageCache.ContainsKey(key))
+        {
+            return; // 이미 있음(예열과 실제 로드가 겹칠 때 중복 삽입 방지).
+        }
+
+        var node = new LinkedListNode<CacheEntry>(new CacheEntry(key, bitmap, bytes, lastWriteUtc));
+        if (atFront)
+        {
+            _imageCacheList.AddFirst(node);
+        }
+        else
+        {
+            _imageCacheList.AddLast(node); // 예열 항목은 맨 뒤 → 한도 초과 시 현재 페이지보다 먼저 버려진다.
+        }
+
+        _imageCache[key] = node;
+        _imageCacheBytes += bytes;
+        TrimImageCache();
+    }
+
+    // 캐시에서 노드를 제거한다(캐시의 강한 참조만 내려놓음 → 사용 중인 Image는 영향 없음).
+    private void RemoveImageCacheNode(LinkedListNode<CacheEntry> node)
+    {
+        _imageCacheList.Remove(node);
+        _imageCache.Remove(node.Value.Key);
+        _imageCacheBytes -= node.Value.Bytes;
+    }
+
+    // 한도를 넘는 동안 가장 오래 안 쓴 항목부터 제거한다.
+    // 단, '가장 최근 항목 하나'는 한도보다 커도 남긴다(큰 단일 이미지가 매번 재디코드되는 것을 막는다).
+    private void TrimImageCache()
+    {
+        var limit = ImageCacheLimitBytes;
+        while (_imageCacheBytes > limit && _imageCacheList.Count > 1)
+        {
+            RemoveImageCacheNode(_imageCacheList.Last!);
+        }
+    }
+
+    // 환경설정에서 한도를 바꿨을 때 적용(0이면 전부 비움, 그 외엔 새 한도로 정리).
+    private void ApplyImageCacheLimit(int limitMb)
+    {
+        _imageCacheLimitMb = limitMb < 0 ? 0 : limitMb;
+        if (_imageCacheLimitMb == 0)
+        {
+            _imageCache.Clear();
+            _imageCacheList.Clear();
+            _imageCacheBytes = 0;
+            return;
+        }
+
+        TrimImageCache();
+    }
+
+    // 페이지가 바뀔 때 호출: 진행 중인 예열을 취소하고, 현재 페이지가 안정된 뒤 인접 페이지를 예열한다.
+    private void BeginPrefetchAdjacentPages()
+    {
+        _prefetchGen++; // 이전 페이지의 예열 취소.
+        if (_imageCacheLimitMb <= 0 || _exporting)
+        {
+            return;
+        }
+
+        // 전환 자체의 반응성을 해치지 않도록 한 박자 뒤(백그라운드 우선순위)에 시작한다.
+        Dispatcher.BeginInvoke(new Action(StartAdjacentPrefetch), System.Windows.Threading.DispatcherPriority.Background);
+    }
+
+    private void StartAdjacentPrefetch()
+    {
+        var gen = _prefetchGen;
+        if (_prefetchStartedGen == gen)
+        {
+            return; // 이 세대 예열은 이미 띄움(빠른 연속 전환 시 중복 작업 방지).
+        }
+
+        var targets = CollectPrefetchPaths();
+        if (targets.Count == 0)
+        {
+            return;
+        }
+
+        _prefetchStartedGen = gen;
+        System.Threading.Tasks.Task.Run(() => PrefetchWorker(gen, targets));
+    }
+
+    // 다음 페이지(우선), 이전 페이지의 '정지 이미지' 경로 중 아직 캐시에 없는 것을 모은다(UI 스레드).
+    private List<string> CollectPrefetchPaths()
+    {
+        var result = new List<string>();
+        if (_imageCacheLimitMb <= 0 || _exporting)
+        {
+            return result;
+        }
+
+        var seen = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
+        foreach (var idx in new[] { _currentPageIndex + 1, _currentPageIndex - 1 })
+        {
+            if (idx < 0 || idx >= _pages.Count)
+            {
+                continue;
+            }
+
+            foreach (var panelData in _pages[idx].Panels)
+            {
+                foreach (var imageData in panelData.Images)
+                {
+                    var ext = System.IO.Path.GetExtension(imageData.Path).ToLowerInvariant();
+                    if (IsVideoExtension(ext))
+                    {
+                        continue; // 동영상은 예열 대상 아님(첫 프레임 캡처는 UI 스레드에 묶여 있음).
+                    }
+
+                    var resolved = ResolveProjectPath(imageData.Path);
+                    var key = resolved.ToLowerInvariant();
+                    if (!seen.Add(key) || _imageCache.ContainsKey(key) || !File.Exists(resolved))
+                    {
+                        continue;
+                    }
+
+                    result.Add(resolved);
+                }
+            }
+        }
+
+        return result;
+    }
+
+    // 백그라운드: 경로들을 디코드해 UI 스레드로 보내 캐시에 '예열용(evict-first)'으로 넣는다.
+    private void PrefetchWorker(int gen, List<string> targets)
+    {
+        foreach (var path in targets)
+        {
+            if (gen != _prefetchGen)
+            {
+                return; // 페이지가 바뀜 → 취소.
+            }
+
+            try
+            {
+                // 애니(gif/webp/apng)는 정지 캐시 대상이 아니므로 건너뛴다.
+                var player = AnimatedPlayer.TryCreate(path);
+                if (player != null)
+                {
+                    player.Dispose();
+                    continue;
+                }
+
+                var writeUtc = File.GetLastWriteTimeUtc(path);
+                var bitmap = LoadStaticBitmap(path);
+                var bytes = FrameBytes(bitmap);
+
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (gen != _prefetchGen)
+                    {
+                        return;
+                    }
+
+                    InsertCacheNode(path.ToLowerInvariant(), bitmap, bytes, writeUtc, atFront: false);
+                }), System.Windows.Threading.DispatcherPriority.Background);
+            }
+            catch
+            {
+                // 디코드 실패 항목은 건너뛴다(예열은 best-effort).
+            }
+        }
+    }
+
     private PanelImage AddPanelImage(ComicPanel panel, string path)
     {
         var ext = System.IO.Path.GetExtension(path).ToLowerInvariant();
@@ -30,8 +275,8 @@ public partial class MainWindow : Window
         FrameworkElement content;
         Image? image = null;
         MediaElement? media = null;
-        BitmapSource[]? frames = null;
-        int[]? delays = null;
+        AnimatedPlayer? animatedPlayer = null;
+        Image? videoPoster = null; // 동영상 로딩 동안 보여줄 첫 프레임(셸 썸네일).
 
         if (IsVideoExtension(ext))
         {
@@ -57,19 +302,39 @@ public partial class MainWindow : Window
             var fileName = System.IO.Path.GetFileName(path);
             media.MediaFailed += (_, _) => UpdateStatus($"동영상을 재생할 수 없습니다: {fileName}");
             content = media;
+
+            // 동영상은 로딩되는 동안 빈(검은) 화면이라, 첫 프레임을 뒤에 깔아 둔다.
+            // 영상이 실제로 뜨면 그 위를 덮으므로, 페이지 진입 시 빈 공간 대신 첫 프레임으로 시작한다.
+            // 내보내기와 동일하게 풀해상도 MediaPlayer 캡처를 우선 쓰고, 실패하면 셸 썸네일로 폴백한다(결과는 캐시).
+            var poster = GetOrCreateCachedBitmap(path, () => CaptureVideoFirstFrame(path) ?? GetVideoStillFrame(path));
+            if (poster != null)
+            {
+                videoPoster = new Image
+                {
+                    Source = poster,
+                    Stretch = Stretch.Uniform,
+                    Width = panel.Frame.Width,
+                    Height = panel.Frame.Height,
+                    RenderTransform = transform,
+                    RenderTransformOrigin = new Point(0.5, 0.5),
+                    IsHitTestVisible = false
+                };
+                RenderOptions.SetBitmapScalingMode(videoPoster, BitmapScalingMode.HighQuality);
+            }
         }
-        else if (TryDecodeAnimatedFrames(path, out frames, out delays))
+        else if ((animatedPlayer = AnimatedPlayer.TryCreate(path)) != null)
         {
-            // 움직이는 gif/webp: 프레임 시퀀스를 타이머로 순환.
+            // 움직이는 gif/webp/apng: 재생하며 프레임마다 디코드(메모리·첫 진입 멈춤 최소화).
+            // 첫 프레임(0)을 디코드해 바로 표시하고, 나머지는 타이머가 그때그때 디코드한다.
             kind = MediaKind.Animated;
-            image = CreateImageControl(frames[0], panel, transform);
+            image = CreateImageControl(animatedPlayer.DecodeFrame(0), panel, transform);
             content = image;
         }
         else
         {
-            // 정지 이미지.
+            // 정지 이미지: 디코드 캐시를 거친다(같은 파일이면 재디코드 생략 → 페이지 전환 가속).
             kind = MediaKind.Static;
-            image = CreateImageControl(LoadStaticBitmap(path), panel, transform);
+            image = CreateImageControl(GetOrDecodeStaticBitmap(path), panel, transform);
             content = image;
         }
 
@@ -113,14 +378,17 @@ public partial class MainWindow : Window
             // 크롭은 칸 사변형 Clip으로 처리한다(ClipToBounds 대신).
             ClipToBounds = false
         };
+        if (videoPoster != null)
+        {
+            layer.Children.Add(videoPoster); // 동영상(content) 아래 → 영상이 뜨면 가려진다.
+        }
         layer.Children.Add(content);
         layer.Children.Add(gradientOverlay); // 콘텐츠 위, 선택 틴트 아래.
         layer.Children.Add(selectionBorder);
 
         var panelImage = new PanelImage(panel, path, kind, layer, content, image, media, selectionBorder, scale, translate)
         {
-            Frames = frames,
-            FrameDelays = delays,
+            Player = animatedPlayer,
             GradientOverlay = gradientOverlay,
             Id = NewObjectId()
         };
@@ -270,28 +538,37 @@ public partial class MainWindow : Window
 
     private static void StartFrameAnimation(PanelImage panelImage)
     {
-        if (panelImage.Image == null || panelImage.Frames == null || panelImage.Frames.Length <= 1)
+        var player = panelImage.Player;
+        if (panelImage.Image == null || player == null || player.FrameCount <= 1)
         {
             return;
         }
 
-        var index = 0;
+        var index = 0; // 프레임 0은 AddPanelImage에서 이미 디코드해 표시했고 플레이어 버퍼에 들어있다.
         var timer = new DispatcherTimer(DispatcherPriority.Render)
         {
-            Interval = TimeSpan.FromMilliseconds(Math.Max(20, panelImage.FrameDelays![0]))
+            Interval = TimeSpan.FromMilliseconds(Math.Max(20, player.DelayMs(0)))
         };
         timer.Tick += (_, _) =>
         {
-            var frames = panelImage.Frames;
-            var delays = panelImage.FrameDelays;
-            if (frames == null || delays == null)
+            var p = panelImage.Player;
+            if (p == null)
             {
                 return;
             }
 
-            index = (index + 1) % frames.Length;
-            panelImage.Image.Source = frames[index];
-            timer.Interval = TimeSpan.FromMilliseconds(Math.Max(20, delays[index]));
+            index = (index + 1) % p.FrameCount;
+            try
+            {
+                // 다음 프레임을 그때그때 디코드한다(전 프레임을 메모리에 들고 있지 않음).
+                panelImage.Image.Source = p.DecodeFrame(index);
+            }
+            catch
+            {
+                return; // 디코드 실패 프레임은 건너뛴다(다음 틱에서 회복 시도).
+            }
+
+            timer.Interval = TimeSpan.FromMilliseconds(Math.Max(20, p.DelayMs(index)));
         };
         panelImage.FrameTimer = timer;
         timer.Start();
@@ -344,69 +621,6 @@ public partial class MainWindow : Window
     }
 
     // gif/webp 등에서 움직이는(2프레임 이상) 프레임을 SkiaSharp로 디코드한다. 정지/실패면 false.
-    private static bool TryDecodeAnimatedFrames(string path,
-        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out BitmapSource[]? frames,
-        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out int[]? delays)
-    {
-        frames = null;
-        delays = null;
-        var ext = System.IO.Path.GetExtension(path).ToLowerInvariant();
-        if (ext is not (".gif" or ".webp" or ".png" or ".apng"))
-        {
-            return false;
-        }
-
-        try
-        {
-            using var codec = SKCodec.Create(path);
-            if (codec == null || codec.FrameCount <= 1)
-            {
-                return false;
-            }
-
-            var info = new SKImageInfo(codec.Info.Width, codec.Info.Height, SKColorType.Bgra8888, SKAlphaType.Premul);
-            var frameInfos = codec.FrameInfo;
-            var outFrames = new BitmapSource[codec.FrameCount];
-            var outDelays = new int[codec.FrameCount];
-
-            SKBitmap? previous = null;
-            for (var i = 0; i < codec.FrameCount; i++)
-            {
-                var bitmap = new SKBitmap(info);
-                var options = new SKCodecOptions(i);
-                if (frameInfos[i].RequiredFrame != -1 && previous != null)
-                {
-                    // 직전 프레임 픽셀 위에 현재 프레임의 변화분을 합성한다(버퍼엔 i-1 프레임이 들어있다).
-                    previous.CopyTo(bitmap);
-                    options = new SKCodecOptions(i, i - 1);
-                }
-
-                codec.GetPixels(info, bitmap.GetPixels(), options);
-
-                var wpf = BitmapSource.Create(info.Width, info.Height, 96, 96,
-                    PixelFormats.Pbgra32, null, bitmap.Bytes, info.RowBytes);
-                wpf.Freeze();
-                outFrames[i] = wpf;
-
-                var duration = frameInfos[i].Duration;
-                outDelays[i] = duration > 0 ? duration : 100;
-
-                previous?.Dispose();
-                previous = bitmap;
-            }
-
-            previous?.Dispose();
-            frames = outFrames;
-            delays = outDelays;
-            return true;
-        }
-        catch
-        {
-            // 코덱 미설치/디코드 실패: 정지 이미지로 폴백.
-            return false;
-        }
-    }
-
     private void RemovePanelImage(PanelImage image)
     {
         var panel = image.OwnerPanel;

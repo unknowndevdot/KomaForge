@@ -22,14 +22,39 @@ public partial class MainWindow : Window
     // 마우스 호버 시 '클릭하면 선택될 대상'을 보여주는 작은 툴팁.
     private System.Windows.Controls.Primitives.Popup? _hoverPopup;
     private TextBlock? _hoverText;
-    // 실행 취소/다시 실행: 전체 문서 상태를 JSON 스냅샷으로 보관한다.
-    private readonly List<string> _undoStack = new();
-    private readonly List<string> _redoStack = new();
-    private string _lastSnapshot = string.Empty;
+    // 실행 취소/다시 실행: 문서 상태를 '페이지별 JSON 목록' 스냅샷으로 보관한다.
+    // 한 동작은 현재 페이지 한 장만 바꾸므로, 스냅샷마다 바뀐 페이지만 새로 직렬화하고
+    // 안 바뀐 페이지는 이전 스냅샷의 문자열을 '공유'한다 → 페이지 수와 무관한 캡처 비용·메모리.
+    private readonly List<HistorySnapshot> _undoStack = new();
+    private readonly List<HistorySnapshot> _redoStack = new();
+    private HistorySnapshot? _baseline;
+    // 변화 감지용 경량 서명(제목+현재페이지+페이지수+이름목록+현재페이지JSON). 클릭/선택 등 무변경 입력에서
+    // 전체 직렬화를 건너뛰기 위해, 매 틱엔 이 싼 서명만 비교한다(편집은 현재 페이지에서만 일어남).
+    private string _lastChangeSignature = string.Empty;
     private System.Windows.Threading.DispatcherTimer? _historyTimer;
     private const int MaxHistory = 60;
     // 입력(마우스·키)이 있을 때만 true가 되어, idle 상태에서 전체 문서를 매 틱 직렬화하는 것을 막는다.
     private bool _historyDirty;
+    // 페이지 추가/삭제/순서이동처럼 '여러 페이지의 위치'가 바뀐 직후엔 인덱스 기반 재사용이 어긋나므로,
+    // 다음 캡처에서 전체 페이지를 다시 직렬화하도록 강제하는 플래그.
+    private bool _historyStructuralPending;
+
+    // 자동저장 디바운스: undo 기록은 즉시(메모리) 남기되, '디스크 쓰기 + 전체 JSON 조립'은
+    // 편집이 잠시 멈춘 뒤(유휴) 한 번만 한다. 연속 편집 중에도 상한 간격마다 강제 저장해 크래시 손실을 막는다.
+    private bool _autosavePending;
+    private int _autosaveIdleTicks; // 마지막 변경 이후 지난 틱(유휴 판정).
+    private int _autosaveAgeTicks;  // 미저장 상태가 된 뒤 지난 틱(강제 저장 상한).
+    private const int AutosaveFlushIdleTicks = 2;  // 약 1.2초 동안 변경이 없으면 저장.
+    private const int AutosaveFlushMaxTicks = 10;  // 연속 편집이라도 약 6초마다 강제 저장.
+
+    // 한 시점의 문서 상태. PageJsons는 페이지별 JSON(불변 문자열)이며, 안 바뀐 페이지는
+    // 여러 스냅샷이 같은 문자열 인스턴스를 공유하므로 실제 메모리는 '바뀐 페이지'만큼만 늘어난다.
+    private sealed class HistorySnapshot
+    {
+        public string Title = string.Empty;
+        public int CurrentIndex;
+        public List<string> PageJsons = new();
+    }
 
     private readonly List<ComicPanel> _panels = new();
     // 한 번에 하나만 선택된다(칸/이미지/말풍선). _selectedPanel은 이미지·말풍선 선택 시
@@ -85,6 +110,7 @@ public partial class MainWindow : Window
     private object? _hoveredObject;     // 현재 호버 강조 중인 오브젝트(칸/이미지/말풍선).
     private bool _selectionPreviewEnabled; // '선택 미리보기 강조' ON/OFF(환경설정-일반). 기본 OFF.
     private bool _keepAspectRatio = true;   // '이미지 크기 조절 시 비율 유지' ON/OFF(환경설정-일반). 기본 ON. 이미지에만 적용.
+    private bool _autosaveDisabled;         // '자동저장 끄기' ON/OFF(환경설정-일반). 기본 OFF(자동저장 켜짐). 켜면 편집 중 주기적 자동저장을 멈춰 렉을 줄인다.
     private double _resizeStartAspect = 1;  // 리사이즈 시작 시점의 가로/세로 비율(비율 유지 기준).
     // 텍스트 영역(여백)을 직접 조절하는 4모서리 핸들(싱글톤, PageOverlay).
     private Thumb? _textRegionTopLeft;
@@ -141,19 +167,19 @@ public partial class MainWindow : Window
         UpdateInspectorLabels();
 
         // 히스토리 초기화: 현재 상태를 기준선으로 삼고, 변화 감지 타이머를 돌린다.
-        _lastSnapshot = CaptureSnapshot();
+        ResetHistoryBaseline();
         UpdateUndoRedoButtons();
         _historyTimer = new System.Windows.Threading.DispatcherTimer
         {
             Interval = TimeSpan.FromMilliseconds(600)
         };
-        _historyTimer.Tick += (_, _) => CaptureHistoryIfChanged();
+        _historyTimer.Tick += (_, _) => HistoryTick();
         _historyTimer.Start();
 
         // 창 레이아웃이 끝난 뒤 기준선을 다시 잡아 시작 시 생기는 잡음 히스토리를 제거한다.
         Loaded += (_, _) =>
         {
-            _lastSnapshot = CaptureSnapshot();
+            ResetHistoryBaseline();
             _undoStack.Clear();
             _redoStack.Clear();
             UpdateUndoRedoButtons();
@@ -477,6 +503,7 @@ public partial class MainWindow : Window
     private void AddPage_Click(object sender, RoutedEventArgs e)
     {
         SaveCurrentPageState();
+        _historyStructuralPending = true; // 페이지 추가: 다음 캡처에서 전체 재직렬화.
         _pages.Add(new ComicPageData { Name = $"Page {_pages.Count + 1}", PageWidth = _pageWidth, PageHeight = _pageHeight });
         _currentPageIndex = _pages.Count - 1;
         LoadPage(_pages[_currentPageIndex]);
@@ -495,6 +522,7 @@ public partial class MainWindow : Window
             return;
         }
 
+        _historyStructuralPending = true; // 페이지 삭제: 다음 캡처에서 전체 재직렬화.
         _pages.RemoveAt(_currentPageIndex);
         _currentPageIndex = Math.Clamp(_currentPageIndex, 0, _pages.Count - 1);
         LoadPage(_pages[_currentPageIndex]);
@@ -522,6 +550,7 @@ public partial class MainWindow : Window
 
         // 현재 편집 내용을 페이지 데이터에 반영한 뒤 위치만 교환한다(표시 중인 페이지는 그대로).
         SaveCurrentPageState();
+        _historyStructuralPending = true; // 페이지 순서 이동: 다음 캡처에서 전체 재직렬화.
         (_pages[_currentPageIndex], _pages[target]) = (_pages[target], _pages[_currentPageIndex]);
         _currentPageIndex = target;
         UpdatePageList();
@@ -691,7 +720,13 @@ public partial class MainWindow : Window
             return;
         }
 
-        // 그 외(선택 안 됨 등)는 ScrollViewer 기본 스크롤에 맡긴다.
+        // 그 외(선택 안 됨 등): 윈도우 휠 설정에 맞춰 세로 스크롤(WPF 기본은 설정을 무시하므로 직접 처리).
+        if (PageScrollViewer.ScrollableHeight > 0)
+        {
+            PageScrollViewer.ScrollToVerticalOffset(
+                PageScrollViewer.VerticalOffset - WheelScrollPixels(PageScrollViewer, e.Delta));
+            e.Handled = true;
+        }
     }
 
     // 커서가 해당 요소의 사각 영역(로컬 0,0~크기) 위에 있는지(가려져 있어도 기하만 판정).
@@ -739,11 +774,22 @@ public partial class MainWindow : Window
         PageListBox.SelectedIndex = target;
     }
 
+    // 윈도우의 '휠 스크롤 줄 수' 설정(SystemParameters.WheelScrollLines)에 맞춘 세로 스크롤 픽셀량.
+    // -1(한 번에 한 화면)이면 뷰포트 높이만큼. 줄당 16px(윈도우 기본 3줄 = 48px, WPF 기본과 동일).
+    private static double WheelScrollPixels(ScrollViewer sv, int wheelDelta)
+    {
+        var lines = SystemParameters.WheelScrollLines;
+        return lines < 0
+            ? sv.ViewportHeight * (wheelDelta / 120.0)
+            : lines * 16.0 * (wheelDelta / 120.0);
+    }
+
     // 인스펙터 안의 리스트 등이 휠을 먼저 소비해 바깥이 안 스크롤되는 문제를 막기 위해,
-    // 터널링 단계에서 인스펙터 ScrollViewer를 직접 스크롤한다.
+    // 터널링 단계에서 인스펙터 ScrollViewer를 직접 스크롤한다(윈도우 휠 설정 반영).
     private void InspectorScrollViewer_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
     {
-        InspectorScrollViewer.ScrollToVerticalOffset(InspectorScrollViewer.VerticalOffset - e.Delta);
+        InspectorScrollViewer.ScrollToVerticalOffset(
+            InspectorScrollViewer.VerticalOffset - WheelScrollPixels(InspectorScrollViewer, e.Delta));
         e.Handled = true;
     }
 
@@ -817,6 +863,75 @@ public partial class MainWindow : Window
         UpdatePageList();
     }
 
+    // 히스토리 기준선을 현재 상태로 다시 잡는다(전체 재직렬화 + 경량 서명).
+    private void ResetHistoryBaseline()
+    {
+        _historyStructuralPending = false;
+        _baseline = CaptureHistorySnapshot(forceFull: true);
+        _lastChangeSignature = ComputeChangeSignature();
+        // 기준선을 새로 잡았다는 건 현재 상태가 곧 참조점이라는 뜻 → 미저장 델타 없음.
+        _autosavePending = false;
+        _autosaveIdleTicks = 0;
+        _autosaveAgeTicks = 0;
+    }
+
+    // 현재 문서를 '페이지별 JSON 목록' 스냅샷으로 캡처한다.
+    // 안 바뀐 페이지(현재 페이지가 아니고 구조 변경도 없음)는 직전 기준선의 문자열을 그대로 공유해
+    // 직렬화·메모리 비용을 '바뀐 페이지' 하나로 한정한다.
+    private HistorySnapshot CaptureHistorySnapshot(bool forceFull = false)
+    {
+        SaveCurrentPageState();
+        var snap = new HistorySnapshot
+        {
+            Title = ComicTitleTextBox.Text.Trim(),
+            CurrentIndex = _currentPageIndex,
+            PageJsons = new List<string>(_pages.Count)
+        };
+
+        var full = forceFull || _baseline == null || _historyStructuralPending
+                   || _pages.Count != _baseline.PageJsons.Count;
+        for (var i = 0; i < _pages.Count; i++)
+        {
+            if (full || i == _currentPageIndex)
+            {
+                snap.PageJsons.Add(SerializePageForHistory(_pages[i]));
+            }
+            else
+            {
+                snap.PageJsons.Add(_baseline!.PageJsons[i]); // 안 바뀐 페이지: 직전 문자열 공유
+            }
+        }
+
+        _historyStructuralPending = false;
+        return snap;
+    }
+
+    // 페이지 한 장을 저장과 동일한 형식(이미지 경로 변환 포함)으로 직렬화한다.
+    private string SerializePageForHistory(ComicPageData page)
+        => JsonSerializer.Serialize(CopyPageForStorage(page, null));
+
+    // 스냅샷(페이지별 JSON)을 RestoreSnapshot이 읽는 전체 프로젝트 JSON으로 조립한다.
+    // 페이지 JSON은 이미 만들어져 있으므로 문자열 연결만으로 끝난다(재직렬화 없음).
+    private static string AssembleFullJson(HistorySnapshot snapshot)
+    {
+        var pages = string.Join(",", snapshot.PageJsons);
+        var title = JsonSerializer.Serialize(snapshot.Title); // 따옴표·이스케이프 포함
+        return $"{{\"Title\":{title},\"CurrentPageIndex\":{snapshot.CurrentIndex},\"Pages\":[{pages}]}}";
+    }
+
+    // 변화 감지용 경량 서명. 편집은 현재 페이지에서만 일어나므로, 전체가 아니라
+    // 제목 + 현재 페이지 인덱스 + 페이지 수 + 모든 페이지 이름 + '현재 페이지'의 JSON만으로 변화를 판별한다.
+    // (다른 페이지의 '내용'은 현재 페이지가 되지 않는 한 바뀌지 않고, 이름·순서·개수는 위 항목으로 잡힌다.)
+    private string ComputeChangeSignature()
+    {
+        SaveCurrentPageState();
+        var names = string.Join("", _pages.Select(p => p.Name));
+        var current = _currentPageIndex >= 0 && _currentPageIndex < _pages.Count
+            ? JsonSerializer.Serialize(_pages[_currentPageIndex])
+            : string.Empty;
+        return $"{ComicTitleTextBox.Text}|{_currentPageIndex}|{_pages.Count}|{names}|{current}";
+    }
+
     // 마지막 기준선과 달라졌으면 변경분을 undo 스택에 쌓는다.
     // 마우스 버튼을 누르고 있는 동안(드래그/슬라이더 조작 중)은 건너뛰어 한 동작을 한 단계로 묶는다.
     private void CaptureHistoryIfChanged()
@@ -826,29 +941,91 @@ public partial class MainWindow : Window
             return;
         }
 
-        // 마지막 캡처 이후 입력이 전혀 없었으면 전체 직렬화를 건너뛴다(idle 비용 제거).
+        // 마지막 캡처 이후 입력이 전혀 없었으면 건너뛴다(idle 비용 제거).
         if (!_historyDirty)
         {
             return;
         }
 
         _historyDirty = false;
-        var snapshot = CaptureSnapshot();
-        if (snapshot == _lastSnapshot)
+
+        // 싼 서명으로 먼저 판별 → 클릭/선택 등 문서가 안 바뀐 입력에서는 전체 직렬화를 생략한다(페이지가 많을수록 큰 절약).
+        var sig = ComputeChangeSignature();
+        if (sig == _lastChangeSignature)
+        {
+            return;
+        }
+        _lastChangeSignature = sig;
+
+        // 실제 변경분만 캡처(바뀐 페이지 한 장만 새로 직렬화, 나머지는 직전 스냅샷 공유).
+        var snapshot = CaptureHistorySnapshot();
+        var prev = _baseline;
+        _baseline = snapshot;
+
+        if (prev != null)
+        {
+            _undoStack.Add(prev);
+            if (_undoStack.Count > MaxHistory)
+            {
+                _undoStack.RemoveAt(0);
+            }
+        }
+
+        _redoStack.Clear();
+        UpdateUndoRedoButtons();
+
+        // 자동저장이 꺼져 있으면 디스크 쓰기를 표시하지 않는다(실행취소 기록은 위에서 이미 메모리에 남김).
+        if (_autosaveDisabled)
         {
             return;
         }
 
-        _undoStack.Add(_lastSnapshot);
-        if (_undoStack.Count > MaxHistory)
+        // 디스크 쓰기는 즉시 하지 않고 '미저장'으로 표시만 한다(편집이 멈춘 뒤 한 번에 flush → 자동저장 I/O 디바운스).
+        if (!_autosavePending)
         {
-            _undoStack.RemoveAt(0);
+            _autosavePending = true;
+            _autosaveAgeTicks = 0;
+        }
+        _autosaveIdleTicks = 0;
+    }
+
+    // 히스토리 타이머 틱: 변경분을 메모리에 기록한 뒤, 미저장분이 있으면 디바운스 조건에서 디스크에 flush한다.
+    private void HistoryTick()
+    {
+        // 동영상 프레임 캡처로 디스패처를 펌프하는 중이면(페이지 로드/내보내기 도중) 끼어들지 않는다.
+        if (_pumpingMedia)
+        {
+            return;
         }
 
-        _lastSnapshot = snapshot;
-        _redoStack.Clear();
-        UpdateUndoRedoButtons();
-        AutoSave(snapshot);
+        CaptureHistoryIfChanged();
+
+        if (!_autosavePending)
+        {
+            return;
+        }
+
+        _autosaveIdleTicks++;
+        _autosaveAgeTicks++;
+        // 편집이 잠시 멈췄거나(유휴), 연속 편집이라도 상한에 도달하면 한 번에 저장한다.
+        if (_autosaveIdleTicks >= AutosaveFlushIdleTicks || _autosaveAgeTicks >= AutosaveFlushMaxTicks)
+        {
+            FlushAutosave();
+        }
+    }
+
+    // 미저장 상태를 디스크에 반영한다(전체 JSON 조립도 이때 한 번만 한다).
+    private void FlushAutosave()
+    {
+        if (!_autosavePending || _baseline == null)
+        {
+            return;
+        }
+
+        _autosavePending = false;
+        _autosaveIdleTicks = 0;
+        _autosaveAgeTicks = 0;
+        AutoSave(AssembleFullJson(_baseline));
     }
 
     private void Undo()
@@ -860,17 +1037,23 @@ public partial class MainWindow : Window
             return;
         }
 
-        _redoStack.Add(_lastSnapshot);
+        if (_baseline != null)
+        {
+            _redoStack.Add(_baseline);
+        }
         var target = _undoStack[^1];
         _undoStack.RemoveAt(_undoStack.Count - 1);
 
         // 재구성 전 현재 선택을 (페이지·인덱스로) 기억했다가, 재구성 후 같은 위치 오브젝트를 다시 선택한다.
         var sel = CaptureSelectionRef();
         var page = _currentPageIndex;
-        RestoreSnapshot(target);
+        RestoreSnapshot(AssembleFullJson(target));
         RestoreSelectionAfterRebuild(sel, page);
 
-        _lastSnapshot = CaptureSnapshot();
+        // 복원한 스냅샷이 곧 새 기준선이다(페이지별 JSON이 그대로 일치하므로 재직렬화 불필요).
+        _baseline = target;
+        _lastChangeSignature = ComputeChangeSignature();
+        _historyStructuralPending = false;
         UpdateUndoRedoButtons();
         UpdateStatus("실행을 취소했습니다.");
     }
@@ -884,16 +1067,21 @@ public partial class MainWindow : Window
             return;
         }
 
-        _undoStack.Add(_lastSnapshot);
+        if (_baseline != null)
+        {
+            _undoStack.Add(_baseline);
+        }
         var target = _redoStack[^1];
         _redoStack.RemoveAt(_redoStack.Count - 1);
 
         var sel = CaptureSelectionRef();
         var page = _currentPageIndex;
-        RestoreSnapshot(target);
+        RestoreSnapshot(AssembleFullJson(target));
         RestoreSelectionAfterRebuild(sel, page);
 
-        _lastSnapshot = CaptureSnapshot();
+        _baseline = target;
+        _lastChangeSignature = ComputeChangeSignature();
+        _historyStructuralPending = false;
         UpdateUndoRedoButtons();
         UpdateStatus("다시 실행했습니다.");
     }
@@ -1009,7 +1197,7 @@ public partial class MainWindow : Window
     }
 
     // 앱 버전(창 제목 등에 표시).
-    private const string AppVersion = "v0.1.0";
+    private const string AppVersion = "v0.1.1";
 
     private void UpdateWindowTitle()
     {

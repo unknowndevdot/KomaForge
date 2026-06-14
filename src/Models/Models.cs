@@ -164,16 +164,17 @@ public sealed class PanelImage
     public BitmapSource? AlphaCacheKey { get; set; }
     public BitmapSource? AlphaCacheValue { get; set; }
 
-    // 움직이는 이미지용 프레임/지연(ms)과 재생 타이머.
-    public BitmapSource[]? Frames { get; set; }
-    public int[]? FrameDelays { get; set; }
+    // 움직이는 이미지: 재생 타이머 + 프레임을 그때그때 디코드하는 스트리밍 플레이어.
     public DispatcherTimer? FrameTimer { get; set; }
+    public AnimatedPlayer? Player { get; set; }
 
-    // 제거 시 재생 자원을 정리한다.
+    // 제거 시 재생 자원을 정리한다(타이머·플레이어 코덱·동영상).
     public void StopPlayback()
     {
         FrameTimer?.Stop();
         FrameTimer = null;
+        Player?.Dispose();
+        Player = null;
         if (Media != null)
         {
             try { Media.Stop(); Media.Close(); } catch { /* 재생 중지 실패는 무시 */ }

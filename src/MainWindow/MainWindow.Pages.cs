@@ -224,56 +224,62 @@ public partial class MainWindow : Window
     {
         SaveCurrentPageState();
         var copiedPages = new List<ComicPageData>();
-
         foreach (var page in _pages)
         {
-            var copiedPage = new ComicPageData { Name = page.Name, PageWidth = page.PageWidth, PageHeight = page.PageHeight };
-
-            foreach (var panel in page.Panels)
-            {
-                var copiedPanel = new ComicPanelData
-                {
-                    Number = panel.Number,
-                    Id = panel.Id,
-                    Name = panel.Name,
-                    X = panel.X,
-                    Y = panel.Y,
-                    Width = panel.Width,
-                    Height = panel.Height,
-                    IsLocked = panel.IsLocked,
-                    CornerMode = panel.CornerMode,
-                    CornerOffsets = (double[])panel.CornerOffsets.Clone(),
-                    Bubbles = panel.Bubbles
-                };
-
-                foreach (var image in panel.Images)
-                {
-                    copiedPanel.Images.Add(new PanelImageData
-                    {
-                        Id = image.Id,
-                        Path = MakeStorablePath(image.Path, projectDirectory),
-                        Scale = image.Scale,
-                        ScaleY = image.ScaleY,
-                        TranslateX = image.TranslateX,
-                        TranslateY = image.TranslateY,
-                        IsCropped = image.IsCropped,
-                        IsLocked = image.IsLocked,
-                        PivotX = image.PivotX,
-                        PivotY = image.PivotY,
-                        GradientDirection = image.GradientDirection,
-                        GradientColor = image.GradientColor,
-                        GradientStart = image.GradientStart,
-                        GradientEnd = image.GradientEnd
-                    });
-                }
-
-                copiedPage.Panels.Add(copiedPanel);
-            }
-
-            copiedPages.Add(copiedPage);
+            copiedPages.Add(CopyPageForStorage(page, projectDirectory));
         }
 
         return copiedPages;
+    }
+
+    // 페이지 한 장을 저장용으로 깊은 복사한다(이미지 경로를 projectDirectory 기준 상대/절대로 변환).
+    // 저장·자동저장·실행취소가 모두 이 한 곳을 거쳐 동일한 직렬화 형식을 보장한다.
+    private ComicPageData CopyPageForStorage(ComicPageData page, string? projectDirectory)
+    {
+        var copiedPage = new ComicPageData { Name = page.Name, PageWidth = page.PageWidth, PageHeight = page.PageHeight };
+
+        foreach (var panel in page.Panels)
+        {
+            var copiedPanel = new ComicPanelData
+            {
+                Number = panel.Number,
+                Id = panel.Id,
+                Name = panel.Name,
+                X = panel.X,
+                Y = panel.Y,
+                Width = panel.Width,
+                Height = panel.Height,
+                IsLocked = panel.IsLocked,
+                CornerMode = panel.CornerMode,
+                CornerOffsets = (double[])panel.CornerOffsets.Clone(),
+                Bubbles = panel.Bubbles
+            };
+
+            foreach (var image in panel.Images)
+            {
+                copiedPanel.Images.Add(new PanelImageData
+                {
+                    Id = image.Id,
+                    Path = MakeStorablePath(image.Path, projectDirectory),
+                    Scale = image.Scale,
+                    ScaleY = image.ScaleY,
+                    TranslateX = image.TranslateX,
+                    TranslateY = image.TranslateY,
+                    IsCropped = image.IsCropped,
+                    IsLocked = image.IsLocked,
+                    PivotX = image.PivotX,
+                    PivotY = image.PivotY,
+                    GradientDirection = image.GradientDirection,
+                    GradientColor = image.GradientColor,
+                    GradientStart = image.GradientStart,
+                    GradientEnd = image.GradientEnd
+                });
+            }
+
+            copiedPage.Panels.Add(copiedPanel);
+        }
+
+        return copiedPage;
     }
 
     private void LoadPage(ComicPageData page)
@@ -304,6 +310,8 @@ public partial class MainWindow : Window
         UpdatePageIndicator();
         // 레이아웃이 갱신된 뒤(스크롤 위치 반영) 현재 뷰포트 기준으로 컬링.
         Dispatcher.BeginInvoke(new Action(CullOffscreenPanels), System.Windows.Threading.DispatcherPriority.Loaded);
+        // 인접 페이지(다음·이전) 정지 이미지를 백그라운드로 미리 디코드해 캐시를 데운다(이전 예열은 취소).
+        BeginPrefetchAdjacentPages();
     }
 
     // --- DTO로부터 런타임 오브젝트 생성(불러오기·붙여넣기 공용) ---

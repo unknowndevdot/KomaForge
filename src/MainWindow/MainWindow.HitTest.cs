@@ -399,6 +399,8 @@ public partial class MainWindow : Window
             SetInspectorVisible(settings.InspectorVisible);
             _selectionPreviewEnabled = settings.SelectionPreview;
             _keepAspectRatio = settings.KeepAspectRatio;
+            _autosaveDisabled = settings.AutosaveDisabled;
+            _imageCacheLimitMb = settings.ImageCacheLimitMb < 0 ? 0 : settings.ImageCacheLimitMb;
             _recentColors.Clear();
             if (settings.RecentColors != null)
             {
@@ -466,6 +468,8 @@ public partial class MainWindow : Window
                 InspectorVisible = InspectorPanel.Visibility == Visibility.Visible,
                 SelectionPreview = _selectionPreviewEnabled,
                 KeepAspectRatio = _keepAspectRatio,
+                AutosaveDisabled = _autosaveDisabled,
+                ImageCacheLimitMb = _imageCacheLimitMb,
                 RecentColors = new List<string>(_recentColors),
                 Shortcuts = ExportShortcuts()
             };

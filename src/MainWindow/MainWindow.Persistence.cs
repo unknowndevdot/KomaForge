@@ -16,11 +16,21 @@ namespace KomaForge;
 
 public partial class MainWindow : Window
 {
+    // 내보내기 중에는 디스패처를 펌프하므로(동영상 첫 프레임 캡처 대기), 메뉴 재클릭에 의한 재진입을 막는다.
+    private bool _exporting;
+    // 동영상 프레임 캡처로 디스패처를 펌프하는 동안엔 히스토리 타이머 등 콜백을 잠시 멈춘다(부분 상태 캡처 방지).
+    private bool _pumpingMedia;
+
     private void ExportPagesAsImages_Click(object sender, RoutedEventArgs e)
     {
         if (_pages.Count == 0)
         {
             UpdateStatus("내보낼 페이지가 없습니다.");
+            return;
+        }
+
+        if (_exporting)
+        {
             return;
         }
 
@@ -43,6 +53,7 @@ public partial class MainWindow : Window
 
         try
         {
+            _exporting = true;
             Mouse.OverrideCursor = Cursors.Wait;
             ClearSelection();
 
@@ -81,6 +92,7 @@ public partial class MainWindow : Window
             _currentPageIndex = Math.Clamp(originalIndex, 0, _pages.Count - 1);
             LoadPage(_pages[_currentPageIndex]);
             Mouse.OverrideCursor = null;
+            _exporting = false;
         }
 
         if (exported > 0)
@@ -141,7 +153,9 @@ public partial class MainWindow : Window
                     continue;
                 }
 
-                var still = GetVideoStillFrame(ResolveProjectPath(image.Path));
+                // 내보내기는 최종 화질 우선: 실제 첫 프레임을 원본 해상도로 캡처하고, 실패 시 셸 썸네일로 폴백.
+                var resolved = ResolveProjectPath(image.Path);
+                var still = CaptureVideoFirstFrame(resolved) ?? GetVideoStillFrame(resolved);
                 if (still == null)
                 {
                     continue;
@@ -167,6 +181,84 @@ public partial class MainWindow : Window
         }
 
         return temps;
+    }
+
+    // 동영상의 '실제 첫 프레임'을 원본 해상도로 캡처한다(내보내기 최종 화질용). 실패하면 null.
+    // MediaPlayer로 0초 프레임을 표시(ScrubbingEnabled)한 뒤 DrawVideo로 RenderTargetBitmap에 그린다.
+    // 미디어 이벤트/디코드는 비동기라, 짧게 디스패처를 펌프하며 준비를 기다린다(내보내기는 1회성이라 허용).
+    private BitmapSource? CaptureVideoFirstFrame(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        MediaPlayer? player = null;
+        try
+        {
+            _pumpingMedia = true; // 펌프 동안 히스토리 캡처 등 타이머 콜백이 끼어들지 않게 한다.
+            player = new MediaPlayer { Volume = 0, ScrubbingEnabled = true };
+            var opened = false;
+            var failed = false;
+            player.MediaOpened += (_, _) => opened = true;
+            player.MediaFailed += (_, _) => failed = true;
+            player.Open(new Uri(path, UriKind.Absolute));
+
+            // MediaOpened까지 대기(자연 해상도 확보). 최대 ~3초.
+            if (!PumpUntil(() => opened || failed, 3000) || failed
+                || player.NaturalVideoWidth <= 0 || player.NaturalVideoHeight <= 0)
+            {
+                return null;
+            }
+
+            // 0초 프레임을 표시: 재생 후 즉시 일시정지하면 ScrubbingEnabled로 그 프레임이 렌더된다.
+            player.Position = TimeSpan.Zero;
+            player.Play();
+            player.Pause();
+
+            // 프레임 디코드/표시를 기다린다(전용 이벤트가 없어 짧게 펌프).
+            PumpUntil(() => false, 400);
+
+            var w = player.NaturalVideoWidth;
+            var h = player.NaturalVideoHeight;
+            var visual = new DrawingVisual();
+            using (var dc = visual.RenderOpen())
+            {
+                dc.DrawVideo(player, new Rect(0, 0, w, h));
+            }
+
+            var rtb = new RenderTargetBitmap(w, h, 96, 96, PixelFormats.Pbgra32);
+            rtb.Render(visual);
+            rtb.Freeze();
+            return rtb;
+        }
+        catch
+        {
+            return null;
+        }
+        finally
+        {
+            try { player?.Close(); } catch { /* 정리 실패는 무시 */ }
+            _pumpingMedia = false;
+        }
+    }
+
+    // 조건이 참이 되거나 제한시간(ms)이 지날 때까지 디스패처를 펌프한다. 조건 충족 시 true.
+    private static bool PumpUntil(Func<bool> condition, int timeoutMs)
+    {
+        var elapsed = 0;
+        const int step = 15;
+        while (!condition() && elapsed < timeoutMs)
+        {
+            var frame = new DispatcherFrame();
+            Dispatcher.CurrentDispatcher.BeginInvoke(
+                DispatcherPriority.Background, new Action(() => frame.Continue = false));
+            Dispatcher.PushFrame(frame);
+            System.Threading.Thread.Sleep(step); // 미디어 스레드가 디코드를 진행할 시간을 준다.
+            elapsed += step;
+        }
+
+        return condition();
     }
 
     // 동영상의 첫 프레임(포스터)을 Windows 셸 썸네일로 얻는다. 실패하면 null.
@@ -356,6 +448,11 @@ public partial class MainWindow : Window
             _currentPageIndex = Math.Clamp(project.CurrentPageIndex, 0, _pages.Count - 1);
             LoadPage(_pages[_currentPageIndex]);
             UpdatePageList();
+            // 불러온 프로젝트로 히스토리 기준선을 새로 잡고 이전 기록을 비운다(프로젝트 간 실행취소 방지·재사용 정합성).
+            ResetHistoryBaseline();
+            _undoStack.Clear();
+            _redoStack.Clear();
+            UpdateUndoRedoButtons();
             UpdateStatus("프로젝트를 불러왔습니다.");
         }
         catch (Exception ex)

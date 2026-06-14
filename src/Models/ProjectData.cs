@@ -153,6 +153,10 @@ public sealed class WindowSettings
     public bool SelectionPreview { get; set; }
     // 이미지 크기 조절 시 항상 비율 유지. OFF면 자유 리사이즈(Shift로 일시 비율 유지). 기본 ON.
     public bool KeepAspectRatio { get; set; } = true;
+    // 자동저장 끄기. ON이면 편집 중 주기적 자동저장을 멈춘다(렉 완화). 기본 OFF(자동저장 켜짐).
+    public bool AutosaveDisabled { get; set; }
+    // 이미지 디코드 캐시 한도(MB). 같은 파일 재디코드를 피해 페이지 전환을 빠르게 한다. 0이면 캐시 끔. 기본 256.
+    public int ImageCacheLimitMb { get; set; } = 256;
     // 사용자 지정 단축키(액션 id → "Ctrl+S" 같은 표기). 없는 항목은 기본값을 쓴다.
     public Dictionary<string, string>? Shortcuts { get; set; }
     // 색 선택기에서 고른 최근 임의 색(최신순, hex).

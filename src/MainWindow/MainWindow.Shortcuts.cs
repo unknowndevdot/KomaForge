@@ -392,6 +392,58 @@ public partial class MainWindow : Window
         {
             Text = "켜면 이미지 크기를 항상 비율 유지한 채 조절합니다. 끄면 자유롭게 조절하되 Shift를 누르면 비율이 유지됩니다. (칸·말풍선은 Shift를 누를 때만 비율 유지)",
             Foreground = new SolidColorBrush(Color.FromRgb(0x77, 0x72, 0x68)),
+            Margin = new Thickness(24, 4, 0, 16),
+            TextWrapping = TextWrapping.Wrap
+        });
+
+        var workingAutosaveDisabled = _autosaveDisabled;
+        var autosaveOffCheck = new CheckBox
+        {
+            Content = "자동저장 끄기",
+            IsChecked = workingAutosaveDisabled,
+            Foreground = new SolidColorBrush(Color.FromRgb(0x20, 0x21, 0x24))
+        };
+        autosaveOffCheck.Checked += (_, _) => workingAutosaveDisabled = true;
+        autosaveOffCheck.Unchecked += (_, _) => workingAutosaveDisabled = false;
+        generalPanel.Children.Add(autosaveOffCheck);
+
+        generalPanel.Children.Add(new TextBlock
+        {
+            Text = "켜면 편집 중 주기적으로 일어나는 자동저장을 멈춥니다. 페이지가 매우 많아 자동저장이 렉을 유발할 때 사용하세요. (실행 취소/다시 실행은 그대로 동작하며, 정상 종료 시에는 한 번 저장됩니다.)",
+            Foreground = new SolidColorBrush(Color.FromRgb(0x77, 0x72, 0x68)),
+            Margin = new Thickness(24, 4, 0, 16),
+            TextWrapping = TextWrapping.Wrap
+        });
+
+        var workingImageCacheMb = _imageCacheLimitMb;
+        var cacheRow = new DockPanel { Margin = new Thickness(0, 0, 0, 0), LastChildFill = false };
+        cacheRow.Children.Add(new TextBlock
+        {
+            Text = "이미지 디코드 캐시 한도(MB)",
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = new SolidColorBrush(Color.FromRgb(0x20, 0x21, 0x24))
+        });
+        var cacheBox = new TextBox
+        {
+            Text = workingImageCacheMb.ToString(),
+            Width = 80,
+            MinHeight = 24,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(12, 0, 0, 0)
+        };
+        cacheBox.TextChanged += (_, _) =>
+        {
+            // 숫자만 허용. 비었거나 음수면 0(=끔)으로 본다. 상한은 적용 시 클램프.
+            workingImageCacheMb = int.TryParse(cacheBox.Text, out var v) && v > 0 ? v : 0;
+        };
+        DockPanel.SetDock(cacheBox, Dock.Right);
+        cacheRow.Children.Add(cacheBox);
+        generalPanel.Children.Add(cacheRow);
+
+        generalPanel.Children.Add(new TextBlock
+        {
+            Text = "같은 이미지 파일을 다시 디코드하지 않고 재사용해 페이지 전환을 빠르게 합니다. 값이 클수록 더 많은 이미지를 기억하지만 메모리를 더 씁니다. 0이면 캐시를 끕니다. (기본 256MB)",
+            Foreground = new SolidColorBrush(Color.FromRgb(0x77, 0x72, 0x68)),
             Margin = new Thickness(24, 4, 0, 0),
             TextWrapping = TextWrapping.Wrap
         });
@@ -432,6 +484,12 @@ public partial class MainWindow : Window
                 ClearHoverHighlight(); // 끄면 현재 떠 있는 강조도 즉시 제거.
             }
             _keepAspectRatio = workingKeepAspect;
+            _autosaveDisabled = workingAutosaveDisabled;
+            if (_autosaveDisabled)
+            {
+                _autosavePending = false; // 끄면 대기 중인 자동저장도 즉시 취소(렉 유발 쓰기 방지).
+            }
+            ApplyImageCacheLimit(Math.Clamp(workingImageCacheMb, 0, 8192));
             RefreshShortcutMenuText();
             SaveWindowSettings();
             dialog.DialogResult = true;
