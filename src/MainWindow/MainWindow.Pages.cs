@@ -473,18 +473,33 @@ public partial class MainWindow : Window
         }
 
         _isUpdatingPageList = true;
-        PageListBox.Items.Clear();
 
-        // 항목은 ComicPageData 객체(인라인 이름 편집 바인딩용). 번호는 ItemTemplate의 AlternationIndex로 표시.
+        // ItemsSource를 _pages(ObservableCollection)에 한 번만 연결한다. 이후 추가/삭제/이동은
+        // 컬렉션 변경 이벤트로 '바뀐 항목만' 증분 갱신되므로 여기서 목록을 다시 만들지 않는다.
+        if (!ReferenceEquals(PageListBox.ItemsSource, _pages))
+        {
+            PageListBox.ItemsSource = _pages;
+        }
+
         foreach (var page in _pages)
         {
-            page.IsEditing = false; // 목록 갱신 시 편집 모드 해제.
-            PageListBox.Items.Add(page);
+            page.IsEditing = false; // 목록 갱신 시 인라인 편집 모드 해제(객체 bool만, 컨테이너 재생성 아님).
         }
 
         PageListBox.SelectedIndex = _currentPageIndex;
         _isUpdatingPageList = false;
         UpdatePageIndicator();
+    }
+
+    // 불러오기/복원처럼 전체를 갈아끼울 때 사용(ObservableCollection엔 AddRange가 없음).
+    // Clear(Reset) 후 한 건씩 추가 — 전체 교체라 증분 이점은 없지만 드물게만 일어난다.
+    private void ReplacePages(IEnumerable<ComicPageData> pages)
+    {
+        _pages.Clear();
+        foreach (var page in pages)
+        {
+            _pages.Add(page);
+        }
     }
 
     private void UpdatePageIndicator()

@@ -1,4 +1,5 @@
 using Microsoft.Win32;
+using System.Collections.ObjectModel;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
@@ -85,7 +86,9 @@ public partial class MainWindow : Window
     private bool _isUpdatingImageList;
     private bool _isUpdatingPageList;
     private int _nextPanelNumber = 1;
-    private readonly List<ComicPageData> _pages = new();
+    // 페이지 목록(PageListBox.ItemsSource로 바인딩). ObservableCollection이라 추가/삭제/이동이
+    // 목록 전체 재구성 없이 '바뀐 항목만' 증분 갱신된다(스크롤·선택 보존, 페이지 수와 무관한 비용).
+    private readonly ObservableCollection<ComicPageData> _pages = new();
     private int _currentPageIndex;
     private string? _projectBaseDirectory;
     // 현재 불러왔거나 저장한 프로젝트 파일 전체 경로(Ctrl+S 덮어쓰기 대상). 없으면 다른 이름으로 저장.
@@ -233,7 +236,7 @@ public partial class MainWindow : Window
         {
             // 페이지/칸 이름 편집 중이면 그 입력칸의 취소(KeyDown)에 맡긴다(선택 해제하지 않음).
             if (Keyboard.FocusedElement is TextBox &&
-                (_pages.Exists(p => p.IsEditing) || _panels.Any(p => p.IsEditing)))
+                (_pages.Any(p => p.IsEditing) || _panels.Any(p => p.IsEditing)))
             {
                 return;
             }
@@ -548,11 +551,15 @@ public partial class MainWindow : Window
             return;
         }
 
-        // 현재 편집 내용을 페이지 데이터에 반영한 뒤 위치만 교환한다(표시 중인 페이지는 그대로).
+        // 현재 편집 내용을 페이지 데이터에 반영한 뒤 위치만 옮긴다(표시 중인 페이지는 그대로).
         SaveCurrentPageState();
         _historyStructuralPending = true; // 페이지 순서 이동: 다음 캡처에서 전체 재직렬화.
-        (_pages[_currentPageIndex], _pages[target]) = (_pages[target], _pages[_currentPageIndex]);
+        // 인접 이동이라 Move 한 번으로 교환과 동일. 목록은 해당 항목만 증분 이동된다.
+        // Move가 부르는 SelectionChanged가 '페이지 전환'으로 오해되지 않게 가드로 감싼다.
+        _isUpdatingPageList = true;
+        _pages.Move(_currentPageIndex, target);
         _currentPageIndex = target;
+        _isUpdatingPageList = false;
         UpdatePageList();
         UpdateStatus("페이지 순서를 옮겼습니다.");
     }
@@ -856,8 +863,7 @@ public partial class MainWindow : Window
         }
 
         ComicTitleTextBox.Text = project.Title;
-        _pages.Clear();
-        _pages.AddRange(project.Pages);
+        ReplacePages(project.Pages);
         _currentPageIndex = Math.Clamp(project.CurrentPageIndex, 0, _pages.Count - 1);
         LoadPage(_pages[_currentPageIndex]);
         UpdatePageList();

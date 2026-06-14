@@ -37,6 +37,15 @@ public partial class MainWindow : Window
         // 현재 편집 중인 페이지 상태를 먼저 저장한다.
         SaveCurrentPageState();
 
+        // 내보내기 설정 창(목표 해상도 등). 취소하면 중단.
+        var options = ShowExportDialog(_pageWidth, _pageHeight);
+        if (options == null)
+        {
+            return;
+        }
+
+        var (scaleX, scaleY) = options.Value;
+
         var dialog = new OpenFolderDialog
         {
             Title = "페이지 이미지를 저장할 폴더 선택"
@@ -69,7 +78,7 @@ public partial class MainWindow : Window
                 var stills = AddVideoStillsForExport();
                 PageSurface.UpdateLayout();
 
-                var bitmap = RenderPageToBitmap();
+                var bitmap = RenderPageToBitmap(scaleX, scaleY);
 
                 foreach (var (layer, temp) in stills)
                 {
@@ -101,11 +110,100 @@ public partial class MainWindow : Window
         }
     }
 
-    // 현재 페이지를 페이지 크기 그대로 비트맵으로 렌더한다.
-    private RenderTargetBitmap RenderPageToBitmap()
+    // 내보내기 설정 창. 배수(게이지)를 받아 (가로배율, 세로배율)을 돌려준다. 취소하면 null.
+    // 페이지마다 크기가 달라 절대 해상도가 아닌 '원본 크기 × 배수'(균일 배율)로 내보낸다.
+    // 세로 스택 레이아웃이라 이후 항목(포맷·배경·여백 등)을 아래에 덧붙이기 쉽다.
+    private (double ScaleX, double ScaleY)? ShowExportDialog(double refW, double refH)
     {
-        var width = (int)Math.Ceiling(_pageWidth);
-        var height = (int)Math.Ceiling(_pageHeight);
+        var nativeW = Math.Max(1, (int)Math.Round(refW));
+        var nativeH = Math.Max(1, (int)Math.Round(refH));
+        (double ScaleX, double ScaleY)? result = null;
+
+        var dialog = new Window
+        {
+            Title = "이미지로 내보내기",
+            Width = 420,
+            SizeToContent = SizeToContent.Height,
+            ResizeMode = ResizeMode.NoResize,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Owner = this,
+            Background = (Brush)FindResource("WindowBackgroundBrush")
+        };
+
+        var dark = new SolidColorBrush(Color.FromRgb(0x20, 0x21, 0x24));
+        var gray = new SolidColorBrush(Color.FromRgb(0x77, 0x72, 0x68));
+        var root = new StackPanel { Margin = new Thickness(16) };
+
+        root.Children.Add(new TextBlock
+        {
+            Text = "배수", FontWeight = FontWeights.Bold, Foreground = dark, Margin = new Thickness(0, 0, 0, 6)
+        });
+        root.Children.Add(new TextBlock
+        {
+            Text = "원본 페이지 크기 × 배수로 내보냅니다. 페이지마다 크기가 달라도 같은 배수가 적용됩니다.",
+            Foreground = gray, Margin = new Thickness(0, 0, 0, 10), TextWrapping = TextWrapping.Wrap
+        });
+
+        var valueLabel = new TextBlock
+        {
+            Foreground = dark, FontWeight = FontWeights.Bold, MinWidth = 52,
+            TextAlignment = TextAlignment.Right, VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(10, 0, 0, 0)
+        };
+        var slider = new Slider
+        {
+            Minimum = 1, Maximum = 4, Value = 1,
+            TickFrequency = 0.25, IsSnapToTickEnabled = true,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        var sizeHint = new TextBlock { Foreground = gray, Margin = new Thickness(0, 8, 0, 0), TextWrapping = TextWrapping.Wrap };
+
+        void Refresh()
+        {
+            var s = slider.Value;
+            valueLabel.Text = $"{s:0.##}×";
+            sizeHint.Text = $"현재 페이지: {(int)Math.Round(nativeW * s)} × {(int)Math.Round(nativeH * s)}px";
+        }
+
+        slider.ValueChanged += (_, _) => Refresh();
+        Refresh();
+
+        var sliderRow = new DockPanel(); // 오른쪽=배수 값, 나머지 영역=슬라이더.
+        DockPanel.SetDock(valueLabel, Dock.Right);
+        sliderRow.Children.Add(valueLabel);
+        sliderRow.Children.Add(slider);
+        root.Children.Add(sliderRow);
+        root.Children.Add(sizeHint);
+
+        var cancelBtn = new Button { Content = "취소", MinWidth = 72 };
+        cancelBtn.Click += (_, _) => dialog.Close();
+        var okBtn = new Button { Content = "내보내기", MinWidth = 72, Margin = new Thickness(0, 0, 8, 0) };
+        okBtn.Click += (_, _) =>
+        {
+            var s = slider.Value;
+            result = (s, s); // 균일 배수.
+            dialog.DialogResult = true;
+        };
+
+        var bottom = new DockPanel { Margin = new Thickness(0, 16, 0, 0), LastChildFill = false };
+        DockPanel.SetDock(cancelBtn, Dock.Right);
+        DockPanel.SetDock(okBtn, Dock.Right);
+        bottom.Children.Add(cancelBtn);
+        bottom.Children.Add(okBtn);
+        root.Children.Add(bottom);
+
+        dialog.Content = root;
+        dialog.ShowDialog();
+        return result;
+    }
+
+    // 현재 페이지를 비트맵으로 렌더한다. scaleX/scaleY로 출력 해상도를 키운다(1=페이지 픽셀 그대로, 슈퍼샘플링).
+    private RenderTargetBitmap RenderPageToBitmap(double scaleX, double scaleY)
+    {
+        // 매우 큰 페이지 × 배수가 메모리를 폭발시키지 않도록 출력 한 변을 16000px로 제한한다.
+        const int maxDim = 16000;
+        var width = Math.Clamp((int)Math.Ceiling(_pageWidth * scaleX), 1, maxDim);
+        var height = Math.Clamp((int)Math.Ceiling(_pageHeight * scaleY), 1, maxDim);
         var pageRect = new Rect(0, 0, _pageWidth, _pageHeight);
 
         // 뷰포트 컬링으로 화면 밖 칸이 Collapsed일 수 있으므로, 내보내기 전 전부 보이게 하고 레이아웃을 갱신한다.
@@ -132,6 +230,12 @@ public partial class MainWindow : Window
             };
             context.DrawRectangle(brush, null, pageRect);
         }
+
+        // 논리 페이지 좌표를 '실제 출력 버퍼 크기'로 확대 → 벡터·이미지가 더 높은 해상도로 재래스터화(슈퍼샘플링).
+        // 버퍼에서 역산한 실효 배율을 써서 클램프가 걸려도 내용이 잘리지 않고 정확히 채워지게 한다.
+        var effScaleX = width / _pageWidth;
+        var effScaleY = height / _pageHeight;
+        visual.Transform = new ScaleTransform(effScaleX, effScaleY);
 
         var rtb = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
         rtb.Render(visual);
@@ -443,8 +547,7 @@ public partial class MainWindow : Window
             ComicTitleTextBox.Text = project.Title;
             AutoMarginTextBox.Text = $"{project.AutoMargin:0}";
             AutoGutterTextBox.Text = $"{project.AutoGutter:0}";
-            _pages.Clear();
-            _pages.AddRange(project.Pages);
+            ReplacePages(project.Pages);
             _currentPageIndex = Math.Clamp(project.CurrentPageIndex, 0, _pages.Count - 1);
             LoadPage(_pages[_currentPageIndex]);
             UpdatePageList();
