@@ -248,6 +248,12 @@ public sealed class SpeechBubble
     public double PivotY { get; set; } = 1;
     // 사용자가 지정한 글자 크기(= 최대). 실제 렌더 크기(TextBlock.FontSize)는 말풍선이 작으면 이 값 이하로 자동 축소된다.
     public double MaxFontSize { get; set; } = 18;
+    // 모서리 조절(사변형 일그러뜨림) 변위. 칸과 동일하게 TL,TR,BR,BL 순서. 기본 0이면 일그러짐 없음.
+    public Point[] CornerOffsets { get; } = { new Point(), new Point(), new Point(), new Point() };
+    // 모서리 조절을 도형(본체·꼬리·외곽선)에 적용할지.
+    public bool WarpShape { get; set; }
+    // 모서리 조절을 안의 글자에 적용할지.
+    public bool WarpText { get; set; }
 
     public override string ToString()
     {
@@ -321,6 +327,19 @@ public sealed class OutlinedTextBlock : FrameworkElement
         nameof(Padding), typeof(Thickness), typeof(OutlinedTextBlock),
         new FrameworkPropertyMetadata(new Thickness(0), FrameworkPropertyMetadataOptions.AffectsMeasure | FrameworkPropertyMetadataOptions.AffectsRender));
 
+    // 모서리 조절(사변형 워프): 4개 모서리 변위(TL,TR,BR,BL). null이면 워프 없음.
+    public static readonly DependencyProperty WarpOffsetsProperty = DependencyProperty.Register(
+        nameof(WarpOffsets), typeof(Point[]), typeof(OutlinedTextBlock),
+        new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
+
+    // 워프 기준이 되는 컨테이너(말풍선) 크기. 글자 요소는 여백만큼 안쪽에 놓이므로 함께 필요.
+    public static readonly DependencyProperty WarpContainerSizeProperty = DependencyProperty.Register(
+        nameof(WarpContainerSize), typeof(Size), typeof(OutlinedTextBlock),
+        new FrameworkPropertyMetadata(new Size(0, 0), FrameworkPropertyMetadataOptions.AffectsRender));
+
+    public Point[]? WarpOffsets { get => (Point[]?)GetValue(WarpOffsetsProperty); set => SetValue(WarpOffsetsProperty, value); }
+    public Size WarpContainerSize { get => (Size)GetValue(WarpContainerSizeProperty); set => SetValue(WarpContainerSizeProperty, value); }
+
     public string Text { get => (string)GetValue(TextProperty); set => SetValue(TextProperty, value); }
     public Brush Fill { get => (Brush)GetValue(FillProperty); set => SetValue(FillProperty, value); }
     public Brush Stroke { get => (Brush)GetValue(StrokeProperty); set => SetValue(StrokeProperty, value); }
@@ -332,7 +351,24 @@ public sealed class OutlinedTextBlock : FrameworkElement
     public TextWrapping TextWrapping { get => (TextWrapping)GetValue(TextWrappingProperty); set => SetValue(TextWrappingProperty, value); }
     public Thickness Padding { get => (Thickness)GetValue(PaddingProperty); set => SetValue(PaddingProperty, value); }
 
-    private FormattedText CreateFormattedText(double maxWidth)
+    // 구간별 서식(글자색·글씨체·아웃라인색). 이어 붙이면 Text와 같아야 한다. null/빈 항목은 기본값 상속.
+    // 색/아웃라인 변형이 있으면 채움색별 그룹으로 렌더하고, 글꼴만 다르면 단일 경로에서도 반영된다.
+    private List<FlowTextRun>? _styledRuns;
+    public List<FlowTextRun>? StyledRuns
+    {
+        get => _styledRuns;
+        set { _styledRuns = value; InvalidateMeasure(); InvalidateVisual(); }
+    }
+
+    // 줄간격(px). 0이면 글꼴 기본 줄간격.
+    private double _lineHeight;
+    public double LineHeight
+    {
+        get => _lineHeight;
+        set { _lineHeight = value; InvalidateMeasure(); InvalidateVisual(); }
+    }
+
+    private FormattedText BuildFormattedText(double fontSize, double maxWidth)
     {
         var typeface = new Typeface(FontFamily ?? new FontFamily("Segoe UI"), FontStyles.Normal, FontWeight, FontStretches.Normal);
         var ft = new FormattedText(
@@ -340,7 +376,7 @@ public sealed class OutlinedTextBlock : FrameworkElement
             System.Globalization.CultureInfo.CurrentUICulture,
             FlowDirection.LeftToRight,
             typeface,
-            Math.Max(1, FontSize),
+            Math.Max(1, fontSize),
             Fill ?? Brushes.Black,
             VisualTreeHelper.GetDpi(this).PixelsPerDip)
         {
@@ -352,30 +388,96 @@ public sealed class OutlinedTextBlock : FrameworkElement
             ft.MaxTextWidth = Math.Max(1, maxWidth);
         }
 
+        if (_lineHeight > 0)
+        {
+            ft.LineHeight = _lineHeight; // 0/미지정이면 글꼴 기본 줄간격.
+        }
+
+        ApplyRunFonts(ft);
         return ft;
     }
 
-    // 지정한 글자 크기로 줄바꿈(maxWidth)했을 때의 텍스트 크기를 잰다(자동 축소 계산용).
-    public Size MeasureAtFont(double fontSize, double maxWidth)
-    {
-        var typeface = new Typeface(FontFamily ?? new FontFamily("Segoe UI"), FontStyles.Normal, FontWeight, FontStretches.Normal);
-        var ft = new FormattedText(
-            Text ?? string.Empty,
-            System.Globalization.CultureInfo.CurrentUICulture,
-            FlowDirection.LeftToRight,
-            typeface,
-            Math.Max(1, fontSize),
-            Brushes.Black,
-            VisualTreeHelper.GetDpi(this).PixelsPerDip)
-        {
-            TextAlignment = TextAlignment
-        };
+    private FormattedText CreateFormattedText(double maxWidth) => BuildFormattedText(FontSize, maxWidth);
 
-        if (TextWrapping != TextWrapping.NoWrap && maxWidth > 0 && !double.IsInfinity(maxWidth))
+    // 구간별 글꼴을 FormattedText의 문자 범위에 적용한다(측정·렌더 공용). 색/아웃라인은 그룹 렌더에서 처리.
+    private void ApplyRunFonts(FormattedText ft)
+    {
+        var runs = _styledRuns;
+        if (runs == null || runs.Count == 0)
         {
-            ft.MaxTextWidth = Math.Max(1, maxWidth);
+            return;
         }
 
+        var total = (Text ?? string.Empty).Length;
+        var pos = 0;
+        foreach (var r in runs)
+        {
+            var len = r.Text.Length;
+            if (len <= 0 || pos >= total)
+            {
+                pos += len;
+                continue;
+            }
+            var start = pos;
+            pos += len;
+            var count = Math.Min(len, total - start);
+            if (!string.IsNullOrEmpty(r.FontFamily))
+            {
+                try { ft.SetFontFamily(new FontFamily(r.FontFamily), start, count); } catch { /* 알 수 없는 글꼴 무시 */ }
+            }
+        }
+    }
+
+    // 구간마다 고유 키색을 전경색으로 부여하고 키색 → (실제 채움,아웃라인) 매핑을 만든다.
+    // 같은 채움색이라도 아웃라인이 다르면 다른 키 → 다른 글리프런으로 분리되어 독립 렌더된다(키색은 그리지 않음).
+    private void AssignRunKeys(FormattedText ft, Dictionary<Color, (Color Fill, Color Outline)> keyToPair)
+    {
+        var runs = _styledRuns;
+        if (runs == null)
+        {
+            return;
+        }
+
+        var baseFill = (Fill as SolidColorBrush)?.Color ?? Colors.Black;
+        var baseStroke = (Stroke as SolidColorBrush)?.Color ?? Colors.Transparent;
+        var total = (Text ?? string.Empty).Length;
+        var pos = 0;
+        var pairKeys = new Dictionary<(Color, Color), Color>();
+        var seq = 0;
+        foreach (var r in runs)
+        {
+            var len = r.Text.Length;
+            if (len <= 0 || pos >= total)
+            {
+                pos += len;
+                continue;
+            }
+            var start = pos;
+            pos += len;
+            var count = Math.Min(len, total - start);
+            var fill = string.IsNullOrEmpty(r.Color) ? baseFill : ParseHexColor(r.Color, baseFill);
+            var outline = string.IsNullOrEmpty(r.OutlineColor) ? baseStroke : ParseHexColor(r.OutlineColor, baseStroke);
+            var pk = (fill, outline);
+            if (!pairKeys.TryGetValue(pk, out var key))
+            {
+                key = Color.FromArgb(255, (byte)(seq >> 16), (byte)(seq >> 8), (byte)seq);
+                seq++;
+                pairKeys[pk] = key;
+                keyToPair[key] = (fill, outline);
+            }
+            try { ft.SetForegroundBrush(new SolidColorBrush(key), start, count); } catch { /* 범위 오류 무시 */ }
+        }
+    }
+
+    private static Color ParseHexColor(string hex, Color fallback)
+    {
+        try { return (Color)ColorConverter.ConvertFromString(hex); } catch { return fallback; }
+    }
+
+    // 지정한 글자 크기로 줄바꿈(maxWidth)했을 때의 텍스트 크기를 잰다(자동 축소 계산용). 구간별 글꼴 반영.
+    public Size MeasureAtFont(double fontSize, double maxWidth)
+    {
+        var ft = BuildFormattedText(fontSize, maxWidth);
         return new Size(ft.Width, ft.Height);
     }
 
@@ -392,7 +494,25 @@ public sealed class OutlinedTextBlock : FrameworkElement
         var pad = Padding;
         var maxWidth = Math.Max(0, ActualWidth - pad.Left - pad.Right);
         var ft = CreateFormattedText(maxWidth);
-        var geometry = ft.BuildGeometry(new Point(pad.Left, pad.Top));
+        var origin = new Point(pad.Left, pad.Top);
+
+        var offs = WarpOffsets;
+        var warpActive = offs != null && offs.Length == 4 && WarpHasOffset(offs)
+                         && WarpContainerSize.Width > 0 && WarpContainerSize.Height > 0;
+
+        // 구간별 색/아웃라인이 있으면 채움색별 그룹으로 그린다(글꼴은 ft에 이미 반영됨).
+        if (NeedGroupedRender())
+        {
+            RenderGroupedRuns(drawingContext, ft, origin, warpActive);
+            return;
+        }
+
+        // 단일 경로: 한 색/한 아웃라인(구간별 글꼴은 ft에 반영되어 BuildGeometry에 포함).
+        var geometry = ft.BuildGeometry(origin);
+        if (warpActive)
+        {
+            geometry = WarpTextGeometry(geometry, offs!);
+        }
 
         // 아웃라인 색이 불투명할 때만 그린다(투명 = 아웃라인 없음). 별도 ON/OFF 없이 색으로만 제어.
         if (Stroke is SolidColorBrush strokeBrush && strokeBrush.Color.A > 0)
@@ -408,6 +528,184 @@ public sealed class OutlinedTextBlock : FrameworkElement
 
         drawingContext.DrawGeometry(Fill, null, geometry);
     }
+
+    private bool NeedGroupedRender()
+    {
+        var runs = _styledRuns;
+        if (runs == null)
+        {
+            return false;
+        }
+        foreach (var r in runs)
+        {
+            if (!string.IsNullOrEmpty(r.Color) || !string.IsNullOrEmpty(r.OutlineColor))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // 구간별 채움/아웃라인 렌더: ft를 비주얼에 그려 글리프(런별 전경색 포함)를 얻고, 채움색별로 묶어
+    // 1패스 외곽선(채움색→아웃라인색 매핑) + 2패스 채움으로 그린다. 워프도 글리프별로 적용.
+    private void RenderGroupedRuns(DrawingContext dc, FormattedText ft, Point origin, bool warpActive)
+    {
+        // 구간마다 고유 키색을 전경색으로 부여한 뒤, 그 글리프를 키색별로 묶어 실제 (채움,아웃라인)으로 그린다.
+        var keyToPair = new Dictionary<Color, (Color Fill, Color Outline)>();
+        AssignRunKeys(ft, keyToPair);
+
+        var temp = new DrawingVisual();
+        using (var c = temp.RenderOpen())
+        {
+            c.DrawText(ft, origin);
+        }
+
+        var byColor = new Dictionary<Color, GeometryGroup>();
+        var dg = VisualTreeHelper.GetDrawing(temp);
+        if (dg != null)
+        {
+            CollectRunGlyphs(dg, Matrix.Identity, byColor, warpActive);
+        }
+        if (byColor.Count == 0)
+        {
+            return;
+        }
+
+        var baseFill = (Fill as SolidColorBrush)?.Color ?? Colors.Black;
+        var baseStroke = (Stroke as SolidColorBrush)?.Color ?? Colors.Transparent;
+        var penWidth = Math.Max(3, FontSize / 3.5);
+
+        // 1패스: 외곽선(모든 글자 뒤로).
+        foreach (var kv in byColor)
+        {
+            var pair = keyToPair.TryGetValue(kv.Key, out var p) ? p : (baseFill, baseStroke);
+            if (pair.Item2.A == 0)
+            {
+                continue;
+            }
+            var pen = new Pen(new SolidColorBrush(pair.Item2), penWidth) { LineJoin = PenLineJoin.Round, MiterLimit = 2 };
+            dc.DrawGeometry(null, pen, kv.Value);
+        }
+        // 2패스: 채움(각 구간의 실제 채움색).
+        foreach (var kv in byColor)
+        {
+            var pair = keyToPair.TryGetValue(kv.Key, out var p) ? p : (baseFill, baseStroke);
+            dc.DrawGeometry(new SolidColorBrush(pair.Item1), null, kv.Value);
+        }
+    }
+
+    private void CollectRunGlyphs(Drawing d, Matrix m, Dictionary<Color, GeometryGroup> acc, bool warpActive)
+    {
+        switch (d)
+        {
+            case DrawingGroup dg:
+                var gm = m;
+                if (dg.Transform != null && !dg.Transform.Value.IsIdentity)
+                {
+                    gm = dg.Transform.Value * m;
+                }
+                foreach (var child in dg.Children)
+                {
+                    CollectRunGlyphs(child, gm, acc, warpActive);
+                }
+                break;
+
+            case GlyphRunDrawing grd when grd.GlyphRun != null:
+                Geometry geo = grd.GlyphRun.BuildGeometry();
+                if (geo == null || geo.IsEmpty())
+                {
+                    break;
+                }
+                if (!m.IsIdentity)
+                {
+                    geo.Transform = new MatrixTransform(m);
+                }
+                if (warpActive)
+                {
+                    geo = WarpTextGeometry(geo, WarpOffsets!);
+                }
+                var color = (grd.ForegroundBrush as SolidColorBrush)?.Color
+                            ?? ((Fill as SolidColorBrush)?.Color ?? Colors.Black);
+                if (!acc.TryGetValue(color, out var grp))
+                {
+                    grp = new GeometryGroup { FillRule = FillRule.Nonzero };
+                    acc[color] = grp;
+                }
+                grp.Children.Add(geo);
+                break;
+        }
+    }
+
+    // 글리프 도형을 잘게 직선화한 뒤, 글자 요소 로컬 좌표를 '컨테이너 좌표 → 사변형 워프 → 다시 요소 로컬'로 옮긴다.
+    private Geometry WarpTextGeometry(Geometry geometry, Point[] offs)
+    {
+        var cw = WarpContainerSize.Width;
+        var ch = WarpContainerSize.Height;
+        var m = Margin;
+        // 글자 요소의 컨테이너 내 좌상단(가로는 stretch라 Margin.Left, 세로는 세로 맞춤에 따라 보정).
+        var ox = m.Left;
+        var slotH = ch - m.Top - m.Bottom;
+        var extra = Math.Max(0, slotH - ActualHeight);
+        var oy = VerticalAlignment switch
+        {
+            System.Windows.VerticalAlignment.Top => m.Top,
+            System.Windows.VerticalAlignment.Bottom => m.Top + extra,
+            _ => m.Top + extra / 2 // Center/Stretch
+        };
+
+        var flat = geometry.GetFlattenedPathGeometry(0.2, ToleranceType.Absolute);
+        var result = new PathGeometry { FillRule = flat.FillRule };
+        foreach (var fig in flat.Figures)
+        {
+            var nf = new PathFigure
+            {
+                IsClosed = fig.IsClosed,
+                IsFilled = fig.IsFilled,
+                StartPoint = WarpLocal(fig.StartPoint, ox, oy, cw, ch, offs)
+            };
+            foreach (var seg in fig.Segments)
+            {
+                if (seg is PolyLineSegment pls)
+                {
+                    var pts = new PointCollection();
+                    foreach (var p in pls.Points)
+                    {
+                        pts.Add(WarpLocal(p, ox, oy, cw, ch, offs));
+                    }
+                    nf.Segments.Add(new PolyLineSegment(pts, seg.IsStroked));
+                }
+                else if (seg is LineSegment ls)
+                {
+                    nf.Segments.Add(new LineSegment(WarpLocal(ls.Point, ox, oy, cw, ch, offs), ls.IsStroked));
+                }
+            }
+            result.Figures.Add(nf);
+        }
+        return result;
+    }
+
+    private static Point WarpLocal(Point p, double ox, double oy, double cw, double ch, Point[] o)
+    {
+        var w = WarpBilinear(ox + p.X, oy + p.Y, cw, ch, o);
+        return new Point(w.X - ox, w.Y - oy);
+    }
+
+    private static Point WarpBilinear(double x, double y, double w, double h, Point[] o)
+    {
+        var u = w > 0 ? x / w : 0;
+        var v = h > 0 ? y / h : 0;
+        var tlX = o[0].X;          var tlY = o[0].Y;
+        var trX = w + o[1].X;      var trY = o[1].Y;
+        var brX = w + o[2].X;      var brY = h + o[2].Y;
+        var blX = o[3].X;          var blY = h + o[3].Y;
+        var nx = (1 - u) * (1 - v) * tlX + u * (1 - v) * trX + u * v * brX + (1 - u) * v * blX;
+        var ny = (1 - u) * (1 - v) * tlY + u * (1 - v) * trY + u * v * brY + (1 - u) * v * blY;
+        return new Point(nx, ny);
+    }
+
+    private static bool WarpHasOffset(Point[] o)
+        => o[0].X != 0 || o[0].Y != 0 || o[1].X != 0 || o[1].Y != 0
+           || o[2].X != 0 || o[2].Y != 0 || o[3].X != 0 || o[3].Y != 0;
 }
 
 public sealed class BubbleTail

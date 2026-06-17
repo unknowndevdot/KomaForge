@@ -44,8 +44,28 @@ public partial class MainWindow : Window
         ApplyBubbleAutoFit(bubble);
 
         UpdateBubbleTailHandles(bubble);
+        ApplyBubbleTextWarp(bubble); // 글자 모서리 조절 파라미터 갱신(크기·변위 변화 반영).
         // 이 말풍선이 속한 칸만 갱신해도 충분하다(다른 칸의 도형은 영향받지 않음).
         UpdateMergedBubbleOutlines(bubble.OwnerPanel);
+    }
+
+    // 글자 워프 파라미터(컨테이너 크기·모서리 변위)를 글자 요소에 전달한다. OFF/변위 0이면 워프 해제.
+    private static void ApplyBubbleTextWarp(SpeechBubble bubble)
+    {
+        var tb = bubble.TextBlock;
+        if (bubble.WarpText && HasCornerWarp(bubble.CornerOffsets))
+        {
+            tb.WarpContainerSize = new Size(Math.Max(1, bubble.Container.Width), Math.Max(1, bubble.Container.Height));
+            // 새 배열로 전달해 DP 변경(재렌더)이 감지되게 한다.
+            tb.WarpOffsets = new[]
+            {
+                bubble.CornerOffsets[0], bubble.CornerOffsets[1], bubble.CornerOffsets[2], bubble.CornerOffsets[3]
+            };
+        }
+        else
+        {
+            tb.WarpOffsets = null;
+        }
     }
 
     // 말풍선 안에 글자가 들어가도록, 설정 글자 크기(MaxFontSize)를 최대로 두고
@@ -196,7 +216,11 @@ public partial class MainWindow : Window
             bubble.ShapePath.Data = null;
             bubble.ShapePath.Clip = null;
 
-            var signature = $"{bubble.Shape}|{bubble.Container.Width:F1}|{bubble.Container.Height:F1}|{bubble.ShapeCount}|{bubble.ShapeStrength:F1}|{bubble.ShapeIrregularity:F1}|{ToHex(bubble.TextBlock.Fill)}";
+            // 모서리 조절(도형)이 켜지면 변위가 바뀔 때마다 선을 다시 그려야 하므로 시그니처에 포함한다.
+            var warpSig = bubble.WarpShape
+                ? string.Join(",", bubble.CornerOffsets.Select(p => $"{p.X:F1}:{p.Y:F1}"))
+                : "off";
+            var signature = $"{bubble.Shape}|{bubble.Container.Width:F1}|{bubble.Container.Height:F1}|{bubble.ShapeCount}|{bubble.ShapeStrength:F1}|{bubble.ShapeIrregularity:F1}|{ToHex(bubble.TextBlock.Fill)}|{warpSig}";
             if (signature == bubble.LineHostSignature)
             {
                 return; // 위치만 바뀐 경우: 로컬 좌표라 그대로 따라오므로 재생성 불필요.
@@ -233,18 +257,79 @@ public partial class MainWindow : Window
             return null;
         }
 
-        var offset = new TranslateTransform(GetCanvasLeft(bubble.Container), GetCanvasTop(bubble.Container));
+        // 먼저 본체+꼬리를 로컬 좌표(컨테이너 원점 기준)에서 합친다.
         Geometry shape = bubble.BodyPath.Data.Clone();
-        shape.Transform = offset;
         foreach (var tail in bubble.Tails)
         {
             var tailGeometry = CreateTailGeometry(tail);
-            tailGeometry.Transform = offset;
             var tailMode = tail.TailInward ? GeometryCombineMode.Exclude : GeometryCombineMode.Union;
             shape = Geometry.Combine(shape, tailGeometry, tailMode, null);
         }
 
+        // 모서리 조절(도형)이 켜져 있고 변위가 있으면 사변형으로 일그러뜨린다.
+        if (bubble.WarpShape && HasCornerWarp(bubble.CornerOffsets))
+        {
+            shape = WarpGeometry(shape, Math.Max(1, bubble.Container.Width), Math.Max(1, bubble.Container.Height), bubble.CornerOffsets);
+        }
+
+        // 마지막에 오버레이 좌표로 평행이동.
+        shape.Transform = new TranslateTransform(GetCanvasLeft(bubble.Container), GetCanvasTop(bubble.Container));
         return shape;
+    }
+
+    // --- 모서리 조절(사변형 워프) 공용 ---
+
+    private static bool HasCornerWarp(Point[] o)
+        => o[0].X != 0 || o[0].Y != 0 || o[1].X != 0 || o[1].Y != 0
+           || o[2].X != 0 || o[2].Y != 0 || o[3].X != 0 || o[3].Y != 0;
+
+    // 로컬 좌표(0..w, 0..h)의 점을 네 모서리(오프셋 반영)가 만드는 사변형으로 이중선형 매핑한다.
+    // 변위가 모두 0이면 항등(원래 좌표 그대로).
+    internal static Point WarpPoint(double x, double y, double w, double h, Point[] o)
+    {
+        var u = w > 0 ? x / w : 0;
+        var v = h > 0 ? y / h : 0;
+        var tlX = o[0].X;          var tlY = o[0].Y;
+        var trX = w + o[1].X;      var trY = o[1].Y;
+        var brX = w + o[2].X;      var brY = h + o[2].Y;
+        var blX = o[3].X;          var blY = h + o[3].Y;
+        var nx = (1 - u) * (1 - v) * tlX + u * (1 - v) * trX + u * v * brX + (1 - u) * v * blX;
+        var ny = (1 - u) * (1 - v) * tlY + u * (1 - v) * trY + u * v * brY + (1 - u) * v * blY;
+        return new Point(nx, ny);
+    }
+
+    // 곡선을 포함한 도형을 잘게 직선화한 뒤 각 점을 워프해 새 도형으로 만든다(비아핀 변환이라 직접 Transform 불가).
+    private static Geometry WarpGeometry(Geometry geo, double w, double h, Point[] o)
+    {
+        var flat = geo.GetFlattenedPathGeometry(0.2, ToleranceType.Absolute);
+        var result = new PathGeometry { FillRule = flat.FillRule };
+        foreach (var fig in flat.Figures)
+        {
+            var nf = new PathFigure
+            {
+                IsClosed = fig.IsClosed,
+                IsFilled = fig.IsFilled,
+                StartPoint = WarpPoint(fig.StartPoint.X, fig.StartPoint.Y, w, h, o)
+            };
+            foreach (var seg in fig.Segments)
+            {
+                if (seg is PolyLineSegment pls)
+                {
+                    var pts = new PointCollection();
+                    foreach (var p in pls.Points)
+                    {
+                        pts.Add(WarpPoint(p.X, p.Y, w, h, o));
+                    }
+                    nf.Segments.Add(new PolyLineSegment(pts, seg.IsStroked));
+                }
+                else if (seg is LineSegment lseg)
+                {
+                    nf.Segments.Add(new LineSegment(WarpPoint(lseg.Point.X, lseg.Point.Y, w, h, o), lseg.IsStroked));
+                }
+            }
+            result.Figures.Add(nf);
+        }
+        return result;
     }
 
     private static Geometry CreateTailGeometry(BubbleTail tail)
@@ -347,6 +432,7 @@ public partial class MainWindow : Window
         PositionImageSelectionBox();
         PositionTextRegionHandles();
         PositionPanelCornerHandles();
+        PositionBubbleCornerHandles();
         EnsureTailHandles();
 
         var tail = _selectedBubbleTail;
@@ -619,6 +705,84 @@ public partial class MainWindow : Window
 
         UpdatePanelShape(_selectedPanel);
         PositionPanelCornerHandles();
+    }
+
+    // --- 말풍선 모서리 조절 핸들(보라색, 칸 핸들과 구분) ---
+
+    private Thumb[]? _bubbleCornerHandles;
+
+    private void EnsureBubbleCornerHandles()
+    {
+        if (_bubbleCornerHandles == null)
+        {
+            var color = Color.FromRgb(150, 70, 180); // 보라색
+            _bubbleCornerHandles = new[]
+            {
+                CreateCornerHandle(color, Cursors.SizeNWSE), // TL
+                CreateCornerHandle(color, Cursors.SizeNESW), // TR
+                CreateCornerHandle(color, Cursors.SizeNWSE), // BR
+                CreateCornerHandle(color, Cursors.SizeNESW)  // BL
+            };
+            for (var i = 0; i < 4; i++)
+            {
+                var index = i;
+                _bubbleCornerHandles[i].DragDelta += (_, e) => DragBubbleCorner(index, e);
+            }
+        }
+
+        foreach (var handle in _bubbleCornerHandles)
+        {
+            if (!PageOverlay.Children.Contains(handle))
+            {
+                PageOverlay.Children.Add(handle);
+                Panel.SetZIndex(handle, int.MaxValue - 1);
+            }
+        }
+    }
+
+    private void PositionBubbleCornerHandles()
+    {
+        EnsureBubbleCornerHandles();
+
+        // 모서리 조절(도형/글자 중 하나라도 ON)일 때만 핸들을 보인다.
+        var show = _selectionKind == SelectionKind.Bubble && _selectedBubble != null
+                   && (_selectedBubble.WarpShape || _selectedBubble.WarpText);
+        var visibility = show ? Visibility.Visible : Visibility.Hidden;
+        foreach (var handle in _bubbleCornerHandles!)
+        {
+            handle.Visibility = visibility;
+        }
+
+        if (!show || _selectedBubble == null)
+        {
+            return;
+        }
+
+        var origin = GetBubblePageOrigin(_selectedBubble);
+        var w = _selectedBubble.Container.Width;
+        var h = _selectedBubble.Container.Height;
+        var o = _selectedBubble.CornerOffsets;
+
+        // TL,TR,BR,BL (CornerOffsets 순서와 동일)
+        PlaceTailHandle(_bubbleCornerHandles[0], origin.X + 0 + o[0].X, origin.Y + 0 + o[0].Y);
+        PlaceTailHandle(_bubbleCornerHandles[1], origin.X + w + o[1].X, origin.Y + 0 + o[1].Y);
+        PlaceTailHandle(_bubbleCornerHandles[2], origin.X + w + o[2].X, origin.Y + h + o[2].Y);
+        PlaceTailHandle(_bubbleCornerHandles[3], origin.X + 0 + o[3].X, origin.Y + h + o[3].Y);
+    }
+
+    private void DragBubbleCorner(int index, DragDeltaEventArgs e)
+    {
+        if (_selectedBubble == null || index < 0 || index > 3)
+        {
+            return;
+        }
+
+        var o = _selectedBubble.CornerOffsets;
+        o[index] = new Point(o[index].X + e.HorizontalChange, o[index].Y + e.VerticalChange);
+        _historyDirty = true;
+
+        UpdateBubbleGeometry(_selectedBubble); // 도형(+글자 워프 파라미터) 갱신.
+        PositionBubbleCornerHandles();
     }
 
     // 말풍선 컨테이너의 (0,0)을 페이지(PageOverlay) 좌표로 변환한다.

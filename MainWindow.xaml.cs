@@ -55,6 +55,8 @@ public partial class MainWindow : Window
         public string Title = string.Empty;
         public int CurrentIndex;
         public List<string> PageJsons = new();
+        // 프로젝트 전체 본문 텍스트(노벨 뷰어)의 직렬화 JSON. 페이지와 무관한 단일 객체.
+        public string FlowJson = "{}";
     }
 
     private readonly List<ComicPanel> _panels = new();
@@ -81,6 +83,9 @@ public partial class MainWindow : Window
     private Point _pendingDownPos;
     private const double PendingMoveCancelThreshold = 6;
     private bool _isLoadingInspector;
+    // 생성자 완료 전(특히 XAML 파싱 중 초기 Text 설정으로 TextChanged가 일찍 발화) 본문 텍스트 핸들러가
+    // 아직 만들어지지 않은 컨트롤을 건드려 NRE가 나는 것을 막는다. 생성자 끝에서 true.
+    private bool _flowReady;
     private bool _isUpdatingBubbleList;
     private bool _isUpdatingBubbleTailList;
     private bool _isUpdatingImageList;
@@ -150,6 +155,8 @@ public partial class MainWindow : Window
         RefreshShortcutMenuText(); // 메뉴의 단축키 표기를 현재 설정으로 맞춘다
         InitColorCombos(); // 팔레트 + 최근색 + '직접 지정…' 으로 색 콤보 구성(LoadWindowSettings 이후라 최근색 반영).
         InitBubbleFontCombo(); // 시스템 글꼴 목록으로 말풍선 글꼴 콤보 구성.
+        InitFlowFontCombo();   // 시스템 글꼴 목록으로 본문 텍스트 글꼴 콤보 구성.
+        _flowReady = true;     // 모든 컨트롤이 만들어졌으므로 본문 텍스트 핸들러를 활성화.
         Closing += (_, _) =>
         {
             SaveWindowSettings();
@@ -603,8 +610,11 @@ public partial class MainWindow : Window
 
     private void SetPageSize(double width, double height, bool updateTextBoxes)
     {
-        _pageWidth = Math.Clamp(width, 100, 5000);
-        _pageHeight = Math.Clamp(height, 100, 5000);
+        var newW = Math.Clamp(width, 100, 5000);
+        var newH = Math.Clamp(height, 100, 5000);
+        var sizeChanged = newW != _pageWidth || newH != _pageHeight;
+        _pageWidth = newW;
+        _pageHeight = newH;
 
         PageSurface.Width = _pageWidth;
         PageSurface.Height = _pageHeight;
@@ -612,6 +622,8 @@ public partial class MainWindow : Window
         PanelCanvas.Height = _pageHeight;
         PageOverlay.Width = _pageWidth;
         PageOverlay.Height = _pageHeight;
+        FlowTextLayer.Width = _pageWidth;
+        FlowTextLayer.Height = _pageHeight;
 
         if (updateTextBoxes)
         {
@@ -621,6 +633,11 @@ public partial class MainWindow : Window
             _isLoadingInspector = false;
         }
 
+        // 페이지 크기가 바뀐 경우에만 본문 분할을 다시 계산한다(페이지 전환 시 불필요한 재분할 회피).
+        if (sizeChanged)
+        {
+            RebuildFlowDocument();
+        }
         UpdatePageFit();
     }
 
@@ -662,16 +679,14 @@ public partial class MainWindow : Window
     // 페이지 배경을 선택한 색으로 적용한다(내보내기 결과 배경에도 반영됨).
     private void ApplyPageBackground()
     {
-        var brush = new SolidColorBrush(CurrentPageBackgroundColor());
         if (PageSurface != null)
         {
-            PageSurface.Background = brush;
+            PageSurface.Background = new SolidColorBrush(CurrentPageBackgroundColor());
         }
 
-        if (PageFrame != null)
-        {
-            PageFrame.Background = brush;
-        }
+        // PageFrame(페이지 뒤 레이어)은 ApplyBackdrop이 단독으로 정한다:
+        // 텍스트 모드 ON이면 뒷배경색, OFF면 페이지 색(기존 동작). 페이지 전환 시에도 일관되게 유지.
+        ApplyBackdrop();
     }
 
     private void ToggleInspector_Click(object sender, RoutedEventArgs e)
@@ -718,6 +733,14 @@ public partial class MainWindow : Window
     {
         // 인스펙터가 닫혀 있으면 휠은 항상 페이지 넘김(선택/위치와 무관).
         if (!IsInspectorOpen())
+        {
+            NavigatePage(e.Delta > 0 ? -1 : 1);
+            e.Handled = true;
+            return;
+        }
+
+        // 편집 모드라도 커서가 페이지 바깥(여백)에 있으면 휠로 페이지를 넘긴다.
+        if (PageSurface != null && !IsMouseOverElement(PageSurface, e))
         {
             NavigatePage(e.Delta > 0 ? -1 : 1);
             e.Handled = true;
@@ -829,7 +852,8 @@ public partial class MainWindow : Window
             CurrentPageIndex = _currentPageIndex,
             // 이미지가 실행 파일 폴더(또는 하위)면 상대 경로로, 아니면 절대 경로로 저장한다.
             // → 실행 파일·자동저장을 이미지와 함께 옮겨도 다음 실행 때 그대로 열린다.
-            Pages = CaptureProjectPages(null)
+            Pages = CaptureProjectPages(null),
+            FlowText = _flow.Clone()
         };
         return JsonSerializer.Serialize(project);
     }
@@ -882,6 +906,7 @@ public partial class MainWindow : Window
         ReplacePages(project.Pages);
         _currentPageIndex = Math.Clamp(project.CurrentPageIndex, 0, _pages.Count - 1);
         LoadPage(_pages[_currentPageIndex]);
+        ApplyFlowText(project.FlowText); // 본문 텍스트·서식 복원(실행취소/자동저장 포함).
         UpdatePageList();
     }
 
@@ -907,7 +932,8 @@ public partial class MainWindow : Window
         {
             Title = ComicTitleTextBox.Text.Trim(),
             CurrentIndex = _currentPageIndex,
-            PageJsons = new List<string>(_pages.Count)
+            PageJsons = new List<string>(_pages.Count),
+            FlowJson = JsonSerializer.Serialize(_flow)
         };
 
         var full = forceFull || _baseline == null || _historyStructuralPending
@@ -938,7 +964,8 @@ public partial class MainWindow : Window
     {
         var pages = string.Join(",", snapshot.PageJsons);
         var title = JsonSerializer.Serialize(snapshot.Title); // 따옴표·이스케이프 포함
-        return $"{{\"Title\":{title},\"CurrentPageIndex\":{snapshot.CurrentIndex},\"Pages\":[{pages}]}}";
+        var flow = string.IsNullOrEmpty(snapshot.FlowJson) ? "{}" : snapshot.FlowJson;
+        return $"{{\"Title\":{title},\"CurrentPageIndex\":{snapshot.CurrentIndex},\"Pages\":[{pages}],\"FlowText\":{flow}}}";
     }
 
     // 변화 감지용 경량 서명. 편집은 현재 페이지에서만 일어나므로, 전체가 아니라
@@ -951,7 +978,7 @@ public partial class MainWindow : Window
         var current = _currentPageIndex >= 0 && _currentPageIndex < _pages.Count
             ? JsonSerializer.Serialize(_pages[_currentPageIndex])
             : string.Empty;
-        return $"{ComicTitleTextBox.Text}|{_currentPageIndex}|{_pages.Count}|{names}|{current}";
+        return $"{ComicTitleTextBox.Text}|{_currentPageIndex}|{_pages.Count}|{names}|{current}|{JsonSerializer.Serialize(_flow)}";
     }
 
     // 마지막 기준선과 달라졌으면 변경분을 undo 스택에 쌓는다.

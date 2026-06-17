@@ -13,6 +13,7 @@ public partial class MainWindow : Window
     // 편집 가능한 명령 단축키 정의(액션 id, 표시명, 기본 수정자, 기본 키).
     private static readonly (string Id, string Label, ModifierKeys Mods, Key Key)[] ShortcutDefs =
     {
+        ("new",   "새로 만들기",     ModifierKeys.Control, Key.N),
         ("open",  "불러오기",       ModifierKeys.Control, Key.O),
         ("save",  "저장",           ModifierKeys.Control, Key.S),
         ("undo",  "실행취소",       ModifierKeys.Control, Key.Z),
@@ -81,6 +82,7 @@ public partial class MainWindow : Window
     {
         switch (id)
         {
+            case "new": NewProject_Click(this, new RoutedEventArgs()); break;
             case "open": LoadProject_Click(this, new RoutedEventArgs()); break;
             case "save": SaveProjectToCurrentOrPrompt(); break;
             case "undo": Undo(); break;
@@ -245,6 +247,7 @@ public partial class MainWindow : Window
     // 메뉴 항목의 단축키 표기를 현재 설정으로 맞춘다.
     private void RefreshShortcutMenuText()
     {
+        NewMenuItem.InputGestureText = GestureText("new");
         OpenMenuItem.InputGestureText = GestureText("open");
         SaveMenuItem.InputGestureText = GestureText("save");
         UndoMenuItem.InputGestureText = GestureText("undo");

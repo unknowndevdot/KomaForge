@@ -7,6 +7,51 @@ public sealed class ComicProjectData
     public double AutoGutter { get; set; } = 14;
     public int CurrentPageIndex { get; set; }
     public List<ComicPageData> Pages { get; set; } = new();
+    // 프로젝트 전체에 걸쳐 페이지별로 자동 분할(노벨 뷰어) 표시되는 본문 텍스트.
+    public FlowTextData FlowText { get; set; } = new();
+}
+
+// 여러 페이지에 흘려 보여줄 본문 텍스트와 서식. 분할은 페이지 크기·이 서식으로 계산된다.
+public sealed class FlowTextData
+{
+    // 텍스트 모드 ON/OFF. OFF면 본문을 페이지에 표시하지 않고 인스펙터 텍스트 섹션도 숨긴다.
+    public bool Enabled { get; set; }
+    public string Text { get; set; } = string.Empty;
+    public string FontFamily { get; set; } = "Malgun Gothic"; // 빈 값이면 기본 글꼴. 기본은 말풍선과 동일.
+    public double FontSize { get; set; } = 20;
+    public double LineHeight { get; set; } = 30;            // 0이면 글꼴 기본 줄간격.
+    public string Alignment { get; set; } = "Justify";      // Left/Center/Right/Justify.
+    public double MarginLeft { get; set; } = 30;
+    public double MarginTop { get; set; } = 30;
+    public double MarginRight { get; set; } = 30;
+    public double MarginBottom { get; set; } = 30;
+    public string Color { get; set; } = "#FFFFFF";
+    // 글자 아웃라인(외곽선) 색. 알파 0(투명)이면 외곽선 없음(말풍선과 동일하게 색으로만 제어).
+    public string OutlineColor { get; set; } = "#000000";
+    // 페이지보다 뒤에 깔리는 단일 배경색. 페이지 배경이 투명이면 이 색이 비쳐 보인다. 알파 0이면 없음.
+    public string BackdropColor { get; set; } = "#FFFFFF";
+    // 구간별 서식(글자색·글씨체·아웃라인색). 순서대로 본문 전체를 덮으며, 이어 붙이면 Text와 같다.
+    // 비어 있으면(구버전) 불러올 때 Text 한 덩어리로 마이그레이션한다.
+    public List<FlowTextRun> Runs { get; set; } = new();
+
+    // Runs를 깊은 복사한다(MemberwiseClone은 리스트 참조를 공유해 실행취소가 오염되므로 직접 복사).
+    public FlowTextData Clone()
+    {
+        var c = (FlowTextData)MemberwiseClone();
+        c.Runs = Runs.Select(r => r.Clone()).ToList();
+        return c;
+    }
+}
+
+// 본문 텍스트의 한 구간(스팬). 색/글꼴/아웃라인이 null·빈 값이면 문서 기본값을 따른다.
+public sealed class FlowTextRun
+{
+    public string Text { get; set; } = string.Empty;
+    public string? FontFamily { get; set; }
+    public string? Color { get; set; }
+    public string? OutlineColor { get; set; }
+
+    public FlowTextRun Clone() => (FlowTextRun)MemberwiseClone();
 }
 
 public sealed class ComicPageData : System.ComponentModel.INotifyPropertyChanged
@@ -97,6 +142,14 @@ public sealed class SpeechBubbleData
     public double FontSize { get; set; } = 18;
     // 글꼴 이름(시스템 글꼴). 빈 값이면 기본 글꼴.
     public string FontFamily { get; set; } = string.Empty;
+    // 가로 맞춤(Left/Center/Right/Justify). 빈 값이면 가운데.
+    public string TextAlignment { get; set; } = "Center";
+    // 세로 맞춤(Top/Center/Bottom). 빈 값이면 가운데.
+    public string VerticalAlignment { get; set; } = "Center";
+    // 구간별 서식(글자색·글씨체·아웃라인색). 비어 있으면 Text 한 덩어리(단일 서식)로 본다.
+    public List<FlowTextRun> Runs { get; set; } = new();
+    // 줄간격(px). 0이면 글꼴 기본 줄간격.
+    public double LineHeight { get; set; }
     public double TextMarginLeft { get; set; } = 16;
     public double TextMarginTop { get; set; } = 12;
     public double TextMarginRight { get; set; } = 16;
@@ -116,6 +169,11 @@ public sealed class SpeechBubbleData
     public double ShapeIrregularity { get; set; } = 50;
     // 폭 불규칙도(0~100, 구름/폭발 전용). 0/미지정이면 효과 없음.
     public double ShapeWidthVariation { get; set; }
+    // 모서리 조절(사변형 일그러뜨림) 변위 TL,TR,BR,BL × X,Y = 8개. 0이면 일그러짐 없음.
+    public double[] CornerOffsets { get; set; } = new double[8];
+    // 모서리 조절을 도형/글자에 적용할지(개별).
+    public bool WarpShape { get; set; }
+    public bool WarpText { get; set; }
     public bool TailInward { get; set; }
     public double PivotX { get; set; }
     public double PivotY { get; set; } = 1;

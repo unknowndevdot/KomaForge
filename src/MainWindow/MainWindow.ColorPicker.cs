@@ -30,10 +30,13 @@ public partial class MainWindow
         _colorCombos.Add((BubbleStrokeColorComboBox, true));
         _colorCombos.Add((BubbleBackgroundColorComboBox, true));
         _colorCombos.Add((ImageGradientColorComboBox, true)); // 투명 포함(투명=이미지 사라짐)
-        _colorCombos.Add((PanelBackgroundColorComboBox, false)); // 칸 배경(단색)
-        _colorCombos.Add((PanelBorderColorComboBox, false));     // 칸 테두리(단색)
+        _colorCombos.Add((PanelBackgroundColorComboBox, true));  // 칸 배경(없음=투명)
+        _colorCombos.Add((PanelBorderColorComboBox, true));      // 칸 테두리(없음=투명)
         _colorCombos.Add((PageBackgroundColorComboBox, true));   // 페이지 배경(투명 포함 → 투명 내보내기)
         _colorCombos.Add((BubbleBorderColorComboBox, false));    // 말풍선 테두리(단색)
+        _colorCombos.Add((FlowColorComboBox, false));            // 본문 텍스트 색(단색)
+        _colorCombos.Add((FlowOutlineColorComboBox, true));      // 본문 텍스트 아웃라인(없음=투명)
+        _colorCombos.Add((FlowBackdropColorComboBox, true));     // 페이지 뒤 배경(없음=투명)
 
         RebuildColorCombos();
 
@@ -45,6 +48,9 @@ public partial class MainWindow
         SelectComboColor(PanelBorderColorComboBox, "#000000");       // 기본 검정
         SelectComboColor(PageBackgroundColorComboBox, "#FFFFFF");     // 기본 흰색
         SelectComboColor(BubbleBorderColorComboBox, "#000000");      // 기본 검정
+        SelectComboColor(FlowColorComboBox, "#FFFFFF");             // 기본 흰색
+        SelectComboColor(FlowOutlineColorComboBox, "#000000");       // 기본 검정
+        SelectComboColor(FlowBackdropColorComboBox, "#FFFFFF");      // 기본 흰색
     }
 
     // 모든 색 콤보를 [없음?]+[최근색]+[팔레트]+[직접 지정…] 순으로 다시 채운다(현재 선택은 유지).

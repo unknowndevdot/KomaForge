@@ -749,6 +749,17 @@ public partial class MainWindow : Window
         var visual = new DrawingVisual();
         using (var context = visual.RenderOpen())
         {
+            // 텍스트 모드의 '뒷배경색'을 페이지보다 먼저(맨 뒤) 깐다. 페이지 배경이 불투명하면 그 위가 덮여 안 보이고,
+            // 페이지 배경이 투명이면 이 색이 그대로 보인다('없음'(알파 0)이면 투명 유지).
+            if (_flow.Enabled)
+            {
+                var backdrop = SafeColor(string.IsNullOrEmpty(_flow.BackdropColor) ? "#FFFFFF" : _flow.BackdropColor);
+                if (backdrop.A > 0)
+                {
+                    context.DrawRectangle(new SolidColorBrush(backdrop), null, pageRect);
+                }
+            }
+
             // 배경을 직접 그린다(페이지별 색). PageSurface는 PageFrame 테두리(1px)만큼 오프셋이 있어
             // VisualBrush로 쓰면 좌/상에 1px 투명 여백이 생기므로, 그리드 원점(0,0)에 있는 PanelCanvas를 렌더한다.
             // 배경색이 투명(알파 0)이면 칠해도 아무 효과가 없어 그 영역이 투명으로 남는다(= 투명 내보내기).
@@ -763,6 +774,19 @@ public partial class MainWindow : Window
                 Stretch = Stretch.Fill
             };
             context.DrawRectangle(brush, null, pageRect);
+
+            // 본문 텍스트(노벨 뷰어) — 칸·이미지 위에 얹힌다. 현재 페이지 분량만큼만 보이므로 그대로 렌더한다.
+            if (FlowTextLayer != null)
+            {
+                FlowTextLayer.UpdateLayout();
+                var flowBrush = new VisualBrush(FlowTextLayer)
+                {
+                    ViewboxUnits = BrushMappingMode.Absolute,
+                    Viewbox = pageRect,
+                    Stretch = Stretch.Fill
+                };
+                context.DrawRectangle(flowBrush, null, pageRect);
+            }
         }
 
         // 논리 페이지 좌표를 '실제 출력 버퍼 크기'로 확대 → 벡터·이미지가 더 높은 해상도로 재래스터화(슈퍼샘플링).
@@ -1036,7 +1060,8 @@ public partial class MainWindow : Window
             AutoMargin = ParseDoubleOr(AutoMarginTextBox.Text, 24),
             AutoGutter = ParseDoubleOr(AutoGutterTextBox.Text, 14),
             CurrentPageIndex = _currentPageIndex,
-            Pages = CaptureProjectPages(Path.GetDirectoryName(fileName))
+            Pages = CaptureProjectPages(Path.GetDirectoryName(fileName)),
+            FlowText = _flow.Clone()
         };
 
         try
@@ -1051,6 +1076,273 @@ public partial class MainWindow : Window
         {
             MessageBox.Show(this, $"프로젝트를 저장할 수 없습니다.\n\n{ex.Message}", "오류", MessageBoxButton.OK, MessageBoxImage.Error);
         }
+    }
+
+    // 새로 만들기(Ctrl+N): 초기 페이지 크기·칸 구성·여백·간격을 정하는 대화상자를 띄운 뒤 그 설정으로 시작한다.
+    private void NewProject_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ShowNewProjectDialog(out var pageW, out var pageH, out var pattern, out var margin, out var gutter))
+        {
+            return; // 취소.
+        }
+
+        ClearSelection();
+        ComicTitleTextBox.Text = string.Empty;
+        _projectFilePath = null;
+        _projectBaseDirectory = null;
+
+        // 선택한 칸 구성 / 여백 / 간격을 입력칸에도 반영(이후 '칸 구성 적용' 등과 일관).
+        LayoutPatternTextBox.Text = pattern;
+        AutoMarginTextBox.Text = $"{margin:0.##}";
+        AutoGutterTextBox.Text = $"{gutter:0.##}";
+
+        // 선택한 크기의 빈 페이지 하나(기본 흰색 배경)로 교체 후 로드하고, 칸 구성을 채운다.
+        ReplacePages(new[] { new ComicPageData { Name = "Page 1", PageWidth = pageW, PageHeight = pageH } });
+        _currentPageIndex = 0;
+        LoadPage(_pages[0]);
+        ApplyFlowText(null); // 본문 텍스트 초기화(빈 본문 + 기본 서식).
+        CreateLayoutFromPattern(pattern);
+        ClearSelection();
+        UpdatePageList();
+
+        ResetHistoryBaseline();
+        _undoStack.Clear();
+        _redoStack.Clear();
+        UpdateUndoRedoButtons();
+        UpdateStatus("새 프로젝트를 만들었습니다.");
+    }
+
+    // 새 프로젝트 시작 설정 대화상자. 확인이면 true와 값들, 취소면 false. 기본값을 미리 채워 둔다.
+    private bool ShowNewProjectDialog(out double pageW, out double pageH, out string pattern, out double margin, out double gutter)
+    {
+        pageW = 832; pageH = 1216; pattern = "1,2,1"; margin = 24; gutter = 14;
+
+        var widthBox = NewProjectNumberBox("832");
+        var heightBox = NewProjectNumberBox("1216");
+        var marginBox = NewProjectNumberBox("24");
+        var gutterBox = NewProjectNumberBox("14");
+
+        // 칸 구성: 숫자 입력 대신 예시 그림 3개 중 선택.
+        var presets = new (string Pattern, int[] Rows, string Label)[]
+        {
+            ("1", new[] { 1 }, "1 (1칸)"),
+            ("2,2", new[] { 2, 2 }, "2,2 (4칸)"),
+            ("1,2,1", new[] { 1, 2, 1 }, "1,2,1 (4칸)")
+        };
+        var selectedPattern = "1,2,1";
+        var landscape = false;
+
+        // 방향(세로/가로)에 따라 미리보기 비율이 달라지므로 썸네일을 다시 만든다.
+        var layoutRow = new StackPanel { Orientation = Orientation.Horizontal };
+        void RebuildThumbs()
+        {
+            layoutRow.Children.Clear();
+            foreach (var p in presets)
+            {
+                var content = new StackPanel { Margin = new Thickness(2, 0, 2, 0) };
+                content.Children.Add(BuildLayoutThumbnail(p.Rows, landscape));
+                content.Children.Add(new TextBlock
+                {
+                    Text = p.Label,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    Margin = new Thickness(0, 5, 0, 0),
+                    FontSize = 11,
+                    Foreground = new SolidColorBrush(Color.FromRgb(0x55, 0x51, 0x4A))
+                });
+                var rb = new RadioButton
+                {
+                    GroupName = "np_layout",
+                    Content = content,
+                    Tag = p.Pattern,
+                    Margin = new Thickness(6, 0, 6, 0),
+                    IsChecked = p.Pattern == selectedPattern
+                };
+                rb.Checked += (_, _) => { if (rb.Tag is string t) selectedPattern = t; };
+                layoutRow.Children.Add(rb);
+            }
+        }
+        RebuildThumbs();
+
+        // 방향: 세로(기본)/가로. 가로를 고르면 너비·높이를 맞바꾸고 미리보기 비율도 가로로 바꾼다.
+        var portraitRb = new RadioButton { Content = "세로", GroupName = "np_orient", IsChecked = true, Margin = new Thickness(0, 0, 16, 0), VerticalAlignment = VerticalAlignment.Center };
+        var landscapeRb = new RadioButton { Content = "가로", GroupName = "np_orient", VerticalAlignment = VerticalAlignment.Center };
+        void SetLandscape(bool land)
+        {
+            if (land == landscape)
+            {
+                return;
+            }
+            landscape = land;
+            (widthBox.Text, heightBox.Text) = (heightBox.Text, widthBox.Text); // 너비↔높이 교환
+            RebuildThumbs();
+        }
+        portraitRb.Checked += (_, _) => SetLandscape(false);
+        landscapeRb.Checked += (_, _) => SetLandscape(true);
+        var orientRow = new StackPanel { Orientation = Orientation.Horizontal };
+        orientRow.Children.Add(portraitRb);
+        orientRow.Children.Add(landscapeRb);
+
+        var panel = new StackPanel { Margin = new Thickness(18) };
+        panel.Children.Add(NewProjectRow("페이지 크기", RowWithMultiplier(widthBox, heightBox)));
+        panel.Children.Add(NewProjectRow("방향", orientRow));
+        panel.Children.Add(NewProjectRow("칸 구성", layoutRow));
+        panel.Children.Add(NewProjectRow("여백", marginBox));
+        panel.Children.Add(NewProjectRow("간격", gutterBox));
+
+        var okBtn = new Button { Content = "만들기", MinWidth = 80, Margin = new Thickness(0, 0, 8, 0), IsDefault = true };
+        var cancelBtn = new Button { Content = "취소", MinWidth = 80, IsCancel = true };
+        var buttons = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(0, 16, 0, 0)
+        };
+        buttons.Children.Add(okBtn);
+        buttons.Children.Add(cancelBtn);
+        panel.Children.Add(buttons);
+
+        var dialog = new Window
+        {
+            Title = "새로 만들기",
+            SizeToContent = SizeToContent.WidthAndHeight,
+            ResizeMode = ResizeMode.NoResize,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Owner = this,
+            Background = (Brush)FindResource("WindowBackgroundBrush"),
+            Content = panel
+        };
+        okBtn.Click += (_, _) => dialog.DialogResult = true;
+
+        if (dialog.ShowDialog() != true)
+        {
+            return false;
+        }
+
+        // 입력값 파싱(잘못되면 기본값). 페이지 크기는 100~5000으로 제한.
+        pageW = Math.Clamp(ParseDoubleOr(widthBox.Text, 832), 100, 5000);
+        pageH = Math.Clamp(ParseDoubleOr(heightBox.Text, 1216), 100, 5000);
+        pattern = selectedPattern;
+        margin = Math.Max(0, ParseDoubleOr(marginBox.Text, 24));
+        gutter = Math.Max(0, ParseDoubleOr(gutterBox.Text, 14));
+        return true;
+    }
+
+    // 칸 구성 예시 미니 그림: 작은 페이지 안에 행별 칸 배치를 사각형으로 그린다. 가로면 비율을 눕힌다.
+    private static FrameworkElement BuildLayoutThumbnail(int[] rows, bool landscape)
+    {
+        var page = new Border
+        {
+            Width = landscape ? 82 : 58,
+            Height = landscape ? 58 : 82,
+            Background = Brushes.White,
+            BorderBrush = new SolidColorBrush(Color.FromRgb(0xBB, 0xB6, 0xAD)),
+            BorderThickness = new Thickness(1),
+            Padding = new Thickness(3) // 페이지 여백 시늉
+        };
+
+        var grid = new Grid();
+        for (var i = 0; i < rows.Length; i++)
+        {
+            grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        }
+
+        for (var r = 0; r < rows.Length; r++)
+        {
+            var rowCells = new UniformGrid { Rows = 1, Columns = Math.Max(1, rows[r]) };
+            for (var c = 0; c < rows[r]; c++)
+            {
+                rowCells.Children.Add(new Border
+                {
+                    Background = new SolidColorBrush(Color.FromRgb(0x8A, 0x84, 0x79)),
+                    Margin = new Thickness(1.5),
+                    CornerRadius = new CornerRadius(1)
+                });
+            }
+
+            Grid.SetRow(rowCells, r);
+            grid.Children.Add(rowCells);
+        }
+
+        page.Child = grid;
+        return page;
+    }
+
+    private static TextBox NewProjectNumberBox(string text) => new()
+    {
+        Text = text,
+        Width = 64,
+        Padding = new Thickness(6, 2, 6, 2),
+        VerticalContentAlignment = VerticalAlignment.Center
+    };
+
+    // "라벨 + 컨트롤" 한 줄(라벨 너비 통일).
+    private static FrameworkElement NewProjectRow(string label, FrameworkElement content)
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 10) };
+        row.Children.Add(new TextBlock
+        {
+            Text = label,
+            Width = 72,
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = new SolidColorBrush(Color.FromRgb(0x55, 0x51, 0x4A))
+        });
+        row.Children.Add(content);
+        return row;
+    }
+
+    // 너비 × 높이 입력을 'W × H' 형태로 묶는다.
+    private static FrameworkElement RowWithMultiplier(TextBox a, TextBox b)
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal };
+        row.Children.Add(a);
+        row.Children.Add(new TextBlock { Text = "×", Margin = new Thickness(8, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center });
+        row.Children.Add(b);
+        return row;
+    }
+
+    // 새로 만들기(텍스트): 노벨 뷰어용 템플릿. 텍스트 모드 ON, 페이지·칸 배경 투명, 페이지 크기와 같은 1칸,
+    // 칸 구성 1 / 여백 0 / 간격 14, 텍스트 뒷배경 검정으로 시작한다.
+    private void NewProjectText_Click(object sender, RoutedEventArgs e)
+    {
+        if (MessageBox.Show(this, "현재 작업을 지우고 새 텍스트 프로젝트를 만듭니다. 계속할까요?", "새로 만들기(텍스트)",
+                MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        ClearSelection();
+        ComicTitleTextBox.Text = string.Empty;
+        _projectFilePath = null;
+        _projectBaseDirectory = null;
+
+        // 칸 구성 1 / 여백 0 / 간격 14.
+        LayoutPatternTextBox.Text = "1";
+        AutoMarginTextBox.Text = "0";
+        AutoGutterTextBox.Text = "14";
+
+        // 배경색 '없음'(투명)인 페이지 하나로 시작.
+        ReplacePages(new[] { new ComicPageData { Name = "Page 1", BackgroundColor = TransparentHex } });
+        _currentPageIndex = 0;
+        LoadPage(_pages[0]);
+
+        // 텍스트 모드 ON + 뒷배경 검정(나머지 서식은 기본값).
+        ApplyFlowText(new FlowTextData { Enabled = true, BackdropColor = "#000000" });
+
+        // 페이지 크기와 같은 1칸을 만들고, 칸 배경도 '없음'(투명)으로 둔다.
+        CreateLayoutFromPattern("1");
+        foreach (var panel in _panels)
+        {
+            panel.QuadFill.Fill = new SolidColorBrush(Colors.Transparent);
+        }
+
+        ClearSelection();
+        UpdatePageList();
+
+        ResetHistoryBaseline();
+        _undoStack.Clear();
+        _redoStack.Clear();
+        UpdateUndoRedoButtons();
+        UpdateStatus("새 텍스트 프로젝트를 만들었습니다.");
     }
 
     private void LoadProject_Click(object sender, RoutedEventArgs e)
@@ -1084,6 +1376,7 @@ public partial class MainWindow : Window
             ReplacePages(project.Pages);
             _currentPageIndex = Math.Clamp(project.CurrentPageIndex, 0, _pages.Count - 1);
             LoadPage(_pages[_currentPageIndex]);
+            ApplyFlowText(project.FlowText); // 본문 텍스트·서식 복원(인스펙터 갱신 + 재분할).
             UpdatePageList();
             // 불러온 프로젝트로 히스토리 기준선을 새로 잡고 이전 기록을 비운다(프로젝트 간 실행취소 방지·재사용 정합성).
             ResetHistoryBaseline();

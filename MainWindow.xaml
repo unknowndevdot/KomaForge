@@ -10,6 +10,8 @@
     <DockPanel>
         <Menu DockPanel.Dock="Top" Background="#F3F0EA">
             <MenuItem Header="파일(_F)">
+                <MenuItem x:Name="NewMenuItem" Header="새로 만들기" InputGestureText="Ctrl+N" Click="NewProject_Click" />
+                <MenuItem x:Name="NewTextMenuItem" Header="새로 만들기 (텍스트 템플릿)" Click="NewProjectText_Click" />
                 <MenuItem x:Name="OpenMenuItem" Header="불러오기..." InputGestureText="Ctrl+O" Click="LoadProject_Click" />
                 <MenuItem x:Name="SaveMenuItem" Header="저장" InputGestureText="Ctrl+S" Click="SaveMenuItem_Click" />
                 <MenuItem Header="다른 이름으로 저장..." Click="SaveProject_Click" />
@@ -67,7 +69,71 @@
                              VerticalScrollBarVisibility="Disabled"
                              Padding="6,2"
                              TextChanged="ComicTitleTextBox_TextChanged"
-                             Margin="0,0,0,18" />
+                             Margin="0,0,0,12" />
+
+                    <!-- 텍스트 모드 토글은 인스펙터에 노출하지 않는다(메뉴 '새로 만들기(텍스트 템플릿)'·프로젝트 불러오기로 결정).
+                         컨트롤은 섹션 표시/숨김 로직을 위해 그대로 두되 화면에는 보이지 않게 Collapsed. -->
+                    <CheckBox x:Name="FlowTextModeCheckBox"
+                              Content="텍스트 모드 (여러 페이지에 본문 흐름)"
+                              Visibility="Collapsed"
+                              Margin="0,0,0,12"
+                              Checked="FlowTextModeCheckBox_Changed"
+                              Unchecked="FlowTextModeCheckBox_Changed" />
+
+                    <Border x:Name="FlowTextSectionBorder" Style="{StaticResource InspectorSection}" Visibility="Collapsed">
+                    <StackPanel>
+                    <TextBlock Text="텍스트 (여러 페이지에 흐름)" Style="{StaticResource SectionHeader}" />
+                    <TextBlock Text="구간을 선택한 뒤 글꼴·글자색·아웃라인색을 바꾸면 그 부분만 적용됩니다(선택이 없으면 전체)."
+                               TextWrapping="Wrap" FontSize="11" Foreground="#8A8479" Margin="0,0,0,6" />
+                    <TextBox x:Name="FlowTextBox"
+                             AcceptsReturn="True" AcceptsTab="True" TextWrapping="Wrap"
+                             VerticalScrollBarVisibility="Auto" Height="120"
+                             Padding="6,4" Margin="0,0,0,8"
+                             IsInactiveSelectionHighlightEnabled="True"
+                             TextChanged="FlowTextBox_TextChanged" />
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                        <TextBlock Text="글꼴" Width="64" VerticalAlignment="Center" Foreground="#55514A" />
+                        <ComboBox x:Name="FlowFontFamilyComboBox" Width="130" MaxDropDownHeight="320" SelectionChanged="FlowFontFamilyComboBox_SelectionChanged" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                        <TextBlock Text="크기" Width="64" VerticalAlignment="Center" Foreground="#55514A" />
+                        <TextBox x:Name="FlowFontSizeBox" Width="60" Text="20" Padding="6,2" VerticalContentAlignment="Center" TextChanged="FlowStyleBox_Changed" />
+                        <TextBlock Text="줄간격" VerticalAlignment="Center" Margin="12,0,6,0" Foreground="#55514A" />
+                        <TextBox x:Name="FlowLineHeightBox" Width="48" Text="30" Padding="6,2" VerticalContentAlignment="Center" TextChanged="FlowStyleBox_Changed" ToolTip="0이면 자동" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                        <TextBlock Text="정렬" Width="64" VerticalAlignment="Center" Foreground="#55514A" />
+                        <ComboBox x:Name="FlowAlignmentComboBox" Width="130" SelectionChanged="FlowAlignmentComboBox_SelectionChanged">
+                            <ComboBoxItem Content="왼쪽" Tag="Left" />
+                            <ComboBoxItem Content="가운데" Tag="Center" />
+                            <ComboBoxItem Content="오른쪽" Tag="Right" />
+                            <ComboBoxItem Content="양쪽" Tag="Justify" IsSelected="True" />
+                        </ComboBox>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                        <TextBlock Text="글자색" Width="64" VerticalAlignment="Center" Foreground="#55514A" />
+                        <ComboBox x:Name="FlowColorComboBox" Width="130" SelectionChanged="FlowColorComboBox_SelectionChanged" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                        <TextBlock Text="아웃라인색" Width="64" VerticalAlignment="Center" Foreground="#55514A" />
+                        <ComboBox x:Name="FlowOutlineColorComboBox" Width="130" SelectionChanged="FlowOutlineColorComboBox_SelectionChanged" ToolTip="'없음'이면 외곽선 없음" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                        <TextBlock Text="뒷배경색" Width="64" VerticalAlignment="Center" Foreground="#55514A" />
+                        <ComboBox x:Name="FlowBackdropColorComboBox" Width="130" SelectionChanged="FlowBackdropColorComboBox_SelectionChanged" ToolTip="페이지 뒤에 깔리는 색. 페이지 배경을 투명으로 하면 이 색이 보입니다. '없음'이면 투명." />
+                    </StackPanel>
+                    <TextBlock Text="여백 (좌·상·우·하)" Foreground="#55514A" Margin="0,0,0,4" />
+                    <UniformGrid Rows="1" Columns="4">
+                        <TextBox x:Name="FlowMarginLeftBox" Text="30" Padding="6,2" VerticalContentAlignment="Center" Margin="0,0,4,0" TextChanged="FlowStyleBox_Changed" />
+                        <TextBox x:Name="FlowMarginTopBox" Text="30" Padding="6,2" VerticalContentAlignment="Center" Margin="0,0,4,0" TextChanged="FlowStyleBox_Changed" />
+                        <TextBox x:Name="FlowMarginRightBox" Text="30" Padding="6,2" VerticalContentAlignment="Center" Margin="0,0,4,0" TextChanged="FlowStyleBox_Changed" />
+                        <TextBox x:Name="FlowMarginBottomBox" Text="30" Padding="6,2" VerticalContentAlignment="Center" Margin="0" TextChanged="FlowStyleBox_Changed" />
+                    </UniformGrid>
+                    <Button Content="텍스트 길이에 맞춰 페이지 생성 및 삭제" Margin="0,12,0,0" Padding="8,5"
+                            Click="FitPagesToFlowText_Click"
+                            ToolTip="본문이 모두 보이도록 페이지 수를 자동으로 맞춥니다(부족하면 추가, 남으면 삭제)." />
+                    </StackPanel>
+                    </Border>
 
                     <Border x:Name="PageSectionBorder"
                             Style="{StaticResource InspectorSection}"
@@ -504,7 +570,68 @@
                     </StackPanel>
                     <Border Style="{StaticResource InspectorGroup}">
                     <StackPanel>
-                    <TextBlock Text="텍스트 · 색상" Style="{StaticResource GroupHeader}" />
+                    <TextBlock Text="텍스트" Style="{StaticResource GroupHeader}" />
+
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                        <TextBlock Text="글자 크기"
+                                   Width="64"
+                                   VerticalAlignment="Center"
+                                   Foreground="#55514A" />
+                        <TextBox x:Name="BubbleFontBox"
+                                 Width="130"
+                                 Text="18"
+                                 Padding="6,2"
+                                 VerticalContentAlignment="Center"
+                                 TextChanged="BubbleFontBox_TextChanged" />
+                        <TextBlock Text="px"
+                                   VerticalAlignment="Center"
+                                   Margin="6,0,0,0"
+                                   Foreground="#55514A" />
+                    </StackPanel>
+
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                        <TextBlock Text="줄간격"
+                                   Width="64"
+                                   VerticalAlignment="Center"
+                                   Foreground="#55514A" />
+                        <TextBox x:Name="BubbleLineHeightBox"
+                                 Width="130"
+                                 Text="0"
+                                 Padding="6,2"
+                                 VerticalContentAlignment="Center"
+                                 ToolTip="0이면 자동"
+                                 TextChanged="BubbleLineHeightBox_TextChanged" />
+                    </StackPanel>
+
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                        <TextBlock Text="가로 맞춤"
+                                   Width="64"
+                                   VerticalAlignment="Center"
+                                   Foreground="#55514A" />
+                        <ComboBox x:Name="BubbleAlignmentComboBox"
+                                  Width="130"
+                                  SelectionChanged="BubbleAlignmentComboBox_SelectionChanged">
+                            <ComboBoxItem Content="왼쪽" Tag="Left" />
+                            <ComboBoxItem Content="가운데" Tag="Center" IsSelected="True" />
+                            <ComboBoxItem Content="오른쪽" Tag="Right" />
+                            <ComboBoxItem Content="양쪽" Tag="Justify" />
+                        </ComboBox>
+                    </StackPanel>
+
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                        <TextBlock Text="세로 맞춤"
+                                   Width="64"
+                                   VerticalAlignment="Center"
+                                   Foreground="#55514A" />
+                        <ComboBox x:Name="BubbleVAlignComboBox"
+                                  Width="130"
+                                  SelectionChanged="BubbleVAlignComboBox_SelectionChanged">
+                            <ComboBoxItem Content="위" Tag="Top" />
+                            <ComboBoxItem Content="가운데" Tag="Center" IsSelected="True" />
+                            <ComboBoxItem Content="아래" Tag="Bottom" />
+                        </ComboBox>
+                    </StackPanel>
+
                     <TextBlock Text="말풍선 텍스트"
                                Foreground="#55514A"
                                Margin="0,0,0,6" />
@@ -513,6 +640,8 @@
                              TextWrapping="Wrap"
                              MinHeight="74"
                              Padding="8"
+                             IsInactiveSelectionHighlightEnabled="True"
+                             ToolTip="구간을 선택한 뒤 글자색·아웃라인색·글꼴을 바꾸면 그 부분만 적용됩니다(선택이 없으면 전체)."
                              TextChanged="SelectedBubbleTextBox_TextChanged"
                              Margin="0,0,0,12" />
 
@@ -528,23 +657,6 @@
                     </StackPanel>
 
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
-                        <TextBlock Text="글자 크기"
-                                   Width="64"
-                                   VerticalAlignment="Center"
-                                   Foreground="#55514A" />
-                        <TextBox x:Name="BubbleFontBox"
-                                 Width="60"
-                                 Text="18"
-                                 Padding="6,2"
-                                 VerticalContentAlignment="Center"
-                                 TextChanged="BubbleFontBox_TextChanged" />
-                        <TextBlock Text="px"
-                                   VerticalAlignment="Center"
-                                   Margin="6,0,0,0"
-                                   Foreground="#55514A" />
-                    </StackPanel>
-
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
                         <TextBlock Text="글자색"
                                    Width="64"
                                    VerticalAlignment="Center"
@@ -554,15 +666,6 @@
                                   SelectionChanged="BubbleFillColorComboBox_SelectionChanged" />
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
-                        <TextBlock Text="배경색"
-                                   Width="64"
-                                   VerticalAlignment="Center"
-                                   Foreground="#55514A" />
-                        <ComboBox x:Name="BubbleBackgroundColorComboBox"
-                                  Width="130"
-                                  SelectionChanged="BubbleBackgroundColorComboBox_SelectionChanged" />
-                    </StackPanel>
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
                         <TextBlock Text="아웃라인색"
                                    Width="64"
                                    VerticalAlignment="Center"
@@ -570,6 +673,36 @@
                         <ComboBox x:Name="BubbleStrokeColorComboBox"
                                   Width="130"
                                   SelectionChanged="BubbleStrokeColorComboBox_SelectionChanged" />
+                    </StackPanel>
+                    <TextBlock Text="텍스트의 일부를 선택한 뒤 글꼴·글자색·아웃라인색을 바꾸면 그 부분에만 적용됩니다(선택이 없으면 전체)."
+                               TextWrapping="Wrap" FontSize="11" Foreground="#8A8479" Margin="0,2,0,0" />
+                    </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource InspectorGroup}">
+                    <StackPanel>
+                    <TextBlock Text="변형 · 배경 · 테두리" Style="{StaticResource GroupHeader}" />
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                        <TextBlock Text="변형"
+                                   Width="64"
+                                   VerticalAlignment="Center"
+                                   Foreground="#55514A"
+                                   ToolTip="네 모서리를 끌어 사변형으로 일그러뜨립니다." />
+                        <CheckBox x:Name="BubbleWarpShapeCheckBox" Content="테두리"
+                                  VerticalAlignment="Center" Margin="0,0,14,0"
+                                  Checked="BubbleWarpCheckBox_Changed" Unchecked="BubbleWarpCheckBox_Changed" />
+                        <CheckBox x:Name="BubbleWarpTextCheckBox" Content="글자"
+                                  VerticalAlignment="Center"
+                                  Checked="BubbleWarpCheckBox_Changed" Unchecked="BubbleWarpCheckBox_Changed" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                        <TextBlock Text="배경색"
+                                   Width="64"
+                                   VerticalAlignment="Center"
+                                   Foreground="#55514A" />
+                        <ComboBox x:Name="BubbleBackgroundColorComboBox"
+                                  Width="130"
+                                  SelectionChanged="BubbleBackgroundColorComboBox_SelectionChanged" />
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
                         <TextBlock Text="테두리색"
@@ -677,7 +810,7 @@
                                 Margin="0,4,0,14" />
                     </StackPanel>
 
-                    <Border Style="{StaticResource InspectorGroup}">
+                    <Border x:Name="BubbleTailSectionBorder" Style="{StaticResource InspectorGroup}">
                     <StackPanel>
                     <TextBlock Text="꼬리" Style="{StaticResource GroupHeader}" />
                     <ListBox x:Name="BubbleTailListBox"
@@ -787,6 +920,12 @@
                                 Width="832"
                                 Height="1216"
                                 ClipToBounds="True" />
+                        <!-- 여러 페이지에 흘려 보여줄 본문 텍스트(칸·이미지 위, 클릭은 통과). -->
+                        <Grid x:Name="FlowTextLayer"
+                              Width="832"
+                              Height="1216"
+                              ClipToBounds="True"
+                              IsHitTestVisible="False" />
                         <Canvas x:Name="PageOverlay"
                                 Width="832"
                                 Height="1216"

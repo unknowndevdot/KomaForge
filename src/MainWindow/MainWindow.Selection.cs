@@ -173,6 +173,14 @@ public partial class MainWindow : Window
         _isLoadingInspector = true;
         var position = GetBubblePositionInOwnerPanel(bubble);
         SelectedBubbleTextBox.Text = bubble.TextBlock.Text;
+        // 텍스트박스가 줄바꿈을 정규화할 수 있으므로 런·Text를 보이는 텍스트에 맞춘다.
+        if ((bubble.TextBlock.Text ?? string.Empty) != SelectedBubbleTextBox.Text)
+        {
+            bubble.TextBlock.StyledRuns = SpliceRuns(
+                bubble.TextBlock.StyledRuns ?? MakeDefaultRuns(bubble.TextBlock.Text ?? string.Empty),
+                bubble.TextBlock.Text ?? string.Empty, SelectedBubbleTextBox.Text);
+            bubble.TextBlock.Text = SelectedBubbleTextBox.Text;
+        }
         BubbleCropCheckBox.IsChecked = bubble.IsCropped;
         BubbleLockCheckBox.IsChecked = bubble.IsLocked;
         BubblePivotXBox.Text = $"{bubble.PivotX:0.##}";
@@ -207,7 +215,20 @@ public partial class MainWindow : Window
         BubbleWidthSlider.Value = bubble.Container.Width;
         BubbleHeightSlider.Value = bubble.Container.Height;
         BubbleFontBox.Text = $"{bubble.MaxFontSize:0}";
+        BubbleLineHeightBox.Text = $"{bubble.TextBlock.LineHeight:0.##}";
         SelectBubbleFontInCombo(bubble.TextBlock.FontFamily?.Source ?? "Malgun Gothic");
+        var bubbleAlign = bubble.TextBlock.TextAlignment.ToString();
+        foreach (ComboBoxItem item in BubbleAlignmentComboBox.Items)
+        {
+            item.IsSelected = (item.Tag as string) == bubbleAlign;
+        }
+        var bubbleVAlign = bubble.TextBlock.VerticalAlignment.ToString();
+        foreach (ComboBoxItem item in BubbleVAlignComboBox.Items)
+        {
+            item.IsSelected = (item.Tag as string) == bubbleVAlign;
+        }
+        BubbleWarpShapeCheckBox.IsChecked = bubble.WarpShape;
+        BubbleWarpTextCheckBox.IsChecked = bubble.WarpText;
         BubbleXSlider.Value = Math.Clamp(position.X, BubbleXSlider.Minimum, BubbleXSlider.Maximum);
         BubbleYSlider.Value = Math.Clamp(position.Y, BubbleYSlider.Minimum, BubbleYSlider.Maximum);
         _isLoadingInspector = false;
@@ -346,8 +367,18 @@ public partial class MainWindow : Window
                 break;
             case SelectionKind.Bubble when _selectedBubble != null:
                 _selectedBubble.TextBlock.Margin = DefaultBubbleTextMargin; // 텍스트 여백을 기본값으로.
-                PositionTextRegionHandles();
-                UpdateStatus("말풍선 텍스트 여백을 기본값으로 되돌렸습니다.");
+                // 변형(모서리) 리셋: 변위 0으로, 테두리·글자 워프 토글 끔.
+                for (var i = 0; i < _selectedBubble.CornerOffsets.Length; i++)
+                {
+                    _selectedBubble.CornerOffsets[i] = new Point();
+                }
+                _selectedBubble.WarpShape = false;
+                _selectedBubble.WarpText = false;
+                _historyDirty = true;
+                UpdateBubbleGeometry(_selectedBubble); // 워프 해제·텍스트 워프 파라미터 갱신.
+                LoadBubbleValues(_selectedBubble);     // 인스펙터(여백 핸들·워프 체크박스) 동기화.
+                PositionSelectedTailHandles();         // 텍스트/모서리 핸들 표시 갱신.
+                UpdateStatus("말풍선 텍스트 여백과 변형을 기본값으로 되돌렸습니다.");
                 break;
             default:
                 UpdateStatus("리셋할 이미지·칸·말풍선을 먼저 선택하세요.");

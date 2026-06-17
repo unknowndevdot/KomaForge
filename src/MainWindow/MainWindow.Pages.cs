@@ -145,6 +145,10 @@ public partial class MainWindow : Window
             Height = bubble.Container.Height,
             FontSize = bubble.MaxFontSize,
             FontFamily = bubble.TextBlock.FontFamily?.Source ?? string.Empty,
+            TextAlignment = bubble.TextBlock.TextAlignment.ToString(),
+            VerticalAlignment = bubble.TextBlock.VerticalAlignment.ToString(),
+            Runs = (bubble.TextBlock.StyledRuns ?? new System.Collections.Generic.List<FlowTextRun>()).Select(r => r.Clone()).ToList(),
+            LineHeight = bubble.TextBlock.LineHeight,
             TextMarginLeft = bubble.TextBlock.Margin.Left,
             TextMarginTop = bubble.TextBlock.Margin.Top,
             TextMarginRight = bubble.TextBlock.Margin.Right,
@@ -162,6 +166,9 @@ public partial class MainWindow : Window
             ShapeStrength = bubble.ShapeStrength,
             ShapeIrregularity = bubble.ShapeIrregularity,
             ShapeWidthVariation = bubble.ShapeWidthVariation,
+            CornerOffsets = PanelOffsetsToArray(bubble.CornerOffsets),
+            WarpShape = bubble.WarpShape,
+            WarpText = bubble.WarpText,
             PivotX = bubble.PivotX,
             PivotY = bubble.PivotY,
             Tails = bubble.Tails
@@ -238,7 +245,14 @@ public partial class MainWindow : Window
     // 저장·자동저장·실행취소가 모두 이 한 곳을 거쳐 동일한 직렬화 형식을 보장한다.
     private ComicPageData CopyPageForStorage(ComicPageData page, string? projectDirectory)
     {
-        var copiedPage = new ComicPageData { Name = page.Name, PageWidth = page.PageWidth, PageHeight = page.PageHeight };
+        var copiedPage = new ComicPageData
+        {
+            Name = page.Name,
+            PageWidth = page.PageWidth,
+            PageHeight = page.PageHeight,
+            BackgroundColor = page.BackgroundColor,
+            BlackBackground = page.BlackBackground
+        };
 
         foreach (var panel in page.Panels)
         {
@@ -253,6 +267,8 @@ public partial class MainWindow : Window
                 Height = panel.Height,
                 IsLocked = panel.IsLocked,
                 CornerMode = panel.CornerMode,
+                BackgroundColor = panel.BackgroundColor,
+                BorderColor = panel.BorderColor,
                 CornerOffsets = (double[])panel.CornerOffsets.Clone(),
                 Bubbles = panel.Bubbles
             };
@@ -316,6 +332,8 @@ public partial class MainWindow : Window
         Dispatcher.BeginInvoke(new Action(CullOffscreenPanels), System.Windows.Threading.DispatcherPriority.Loaded);
         // 인접 페이지(다음·이전) 정지 이미지를 백그라운드로 미리 디코드해 캐시를 데운다(이전 예열은 취소).
         BeginPrefetchAdjacentPages();
+        // 본문 텍스트(노벨 뷰어): 이 페이지 인덱스에 해당하는 분량 표시.
+        UpdateFlowTextLayer();
     }
 
     // --- DTO로부터 런타임 오브젝트 생성(불러오기·붙여넣기 공용) ---
@@ -366,8 +384,16 @@ public partial class MainWindow : Window
         if (!string.IsNullOrEmpty(bubbleData.Id)) bubble.Id = bubbleData.Id; // 저장/실행취소 ID 유지(붙여넣기는 새 ID).
         // 글꼴 복원(구버전/미지정이면 기존 기본 글꼴).
         bubble.TextBlock.FontFamily = new FontFamily(string.IsNullOrEmpty(bubbleData.FontFamily) ? "Malgun Gothic" : bubbleData.FontFamily);
+        // 텍스트 정렬 복원(구버전/미지정이면 가운데).
+        bubble.TextBlock.TextAlignment = ParseFlowAlignment(string.IsNullOrEmpty(bubbleData.TextAlignment) ? "Center" : bubbleData.TextAlignment);
+        bubble.TextBlock.VerticalAlignment = ParseVerticalAlignment(string.IsNullOrEmpty(bubbleData.VerticalAlignment) ? "Center" : bubbleData.VerticalAlignment);
+        // 구간별 서식 복원(구버전/미지정이면 Text 한 덩어리로 마이그레이션). 측정·렌더가 이를 쓰므로 먼저 설정.
+        bubble.TextBlock.StyledRuns = bubbleData.Runs is { Count: > 0 }
+            ? bubbleData.Runs.Select(r => r.Clone()).ToList()
+            : MakeDefaultRuns(bubbleData.Text);
         bubble.BorderColor = SafeColor(string.IsNullOrEmpty(bubbleData.BorderColor) ? "#000000" : bubbleData.BorderColor);
         bubble.TextBlock.Margin = new Thickness(bubbleData.TextMarginLeft, bubbleData.TextMarginTop, bubbleData.TextMarginRight, bubbleData.TextMarginBottom);
+        bubble.TextBlock.LineHeight = bubbleData.LineHeight;
 
         var (mappedShape, legacyStrength) = MapShape(bubbleData.Shape);
         bubble.Shape = mappedShape;
@@ -376,6 +402,9 @@ public partial class MainWindow : Window
         // 0/미지정(구버전)이면 기존 기본 흔들림 50으로 본다.
         bubble.ShapeIrregularity = bubbleData.ShapeIrregularity <= 0 ? 50 : bubbleData.ShapeIrregularity;
         bubble.ShapeWidthVariation = bubbleData.ShapeWidthVariation;
+        ApplyArrayToPanelOffsets(bubbleData.CornerOffsets, bubble.CornerOffsets);
+        bubble.WarpShape = bubbleData.WarpShape;
+        bubble.WarpText = bubbleData.WarpText;
         bubble.PivotX = bubbleData.PivotX;
         bubble.PivotY = bubbleData.PivotY;
         bubble.Tails.Clear();

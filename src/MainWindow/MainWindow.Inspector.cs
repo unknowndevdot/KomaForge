@@ -414,10 +414,59 @@ public partial class MainWindow : Window
 
         if (BubbleFontFamilyComboBox.SelectedItem is ComboBoxItem item && item.Tag is string family)
         {
-            _selectedBubble.TextBlock.FontFamily = new FontFamily(family);
             _lastBubbleFontFamily = family; // 새 말풍선에 이어서 적용.
-            UpdateBubbleGeometry(_selectedBubble);
+            // 선택 구간이 있으면 그 구간만, 없으면 말풍선 전체 글꼴.
+            ApplyBubbleRunStyle(
+                r => r.FontFamily = family,
+                () => _selectedBubble!.TextBlock.FontFamily = new FontFamily(family));
         }
+    }
+
+    private void BubbleAlignmentComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isLoadingInspector || _selectedBubble == null)
+        {
+            return;
+        }
+
+        var align = (BubbleAlignmentComboBox.SelectedItem as ComboBoxItem)?.Tag as string ?? "Center";
+        _selectedBubble.TextBlock.TextAlignment = ParseFlowAlignment(align);
+        _historyDirty = true;
+        UpdateBubbleGeometry(_selectedBubble);
+    }
+
+    private void BubbleVAlignComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isLoadingInspector || _selectedBubble == null)
+        {
+            return;
+        }
+
+        var v = (BubbleVAlignComboBox.SelectedItem as ComboBoxItem)?.Tag as string ?? "Center";
+        _selectedBubble.TextBlock.VerticalAlignment = ParseVerticalAlignment(v);
+        _historyDirty = true;
+        UpdateBubbleGeometry(_selectedBubble);
+    }
+
+    private static VerticalAlignment ParseVerticalAlignment(string v) => v switch
+    {
+        "Top" => VerticalAlignment.Top,
+        "Bottom" => VerticalAlignment.Bottom,
+        _ => VerticalAlignment.Center
+    };
+
+    private void BubbleWarpCheckBox_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_isLoadingInspector || _selectedBubble == null)
+        {
+            return;
+        }
+
+        _selectedBubble.WarpShape = BubbleWarpShapeCheckBox.IsChecked == true;
+        _selectedBubble.WarpText = BubbleWarpTextCheckBox.IsChecked == true;
+        _historyDirty = true;
+        UpdateBubbleGeometry(_selectedBubble); // 도형/글자 워프 적용·해제.
+        PositionSelectedTailHandles();         // 모서리 핸들 표시/숨김 갱신.
     }
 
     // 글자 크기 입력칸의 현재 값(없거나 잘못되면 18). 6~300으로 제한.
@@ -436,6 +485,18 @@ public partial class MainWindow : Window
             _selectedBubble.MaxFontSize = Math.Clamp(v, 6, 300); // 설정값은 최대치(autofit이 더 줄일 수 있음).
             UpdateBubbleGeometry(_selectedBubble);
         }
+    }
+
+    private void BubbleLineHeightBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_isLoadingInspector || _selectedBubble == null)
+        {
+            return;
+        }
+
+        _selectedBubble.TextBlock.LineHeight = Math.Max(0, ParseDoubleOr(BubbleLineHeightBox.Text, 0));
+        _historyDirty = true;
+        UpdateBubbleGeometry(_selectedBubble); // autofit 재계산 + 재렌더.
     }
 
     private void BubbleSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -555,12 +616,14 @@ public partial class MainWindow : Window
     {
         OnBubbleColorComboChanged(BubbleFillColorComboBox,
             () => (_selectedBubble!.TextBlock.Fill as SolidColorBrush)?.Color ?? Colors.Black,
-            c =>
-            {
-                _selectedBubble!.TextBlock.Fill = new SolidColorBrush(c);
-                // 집중선/효과선은 선 색이 글자색을 따르므로 즉시 갱신한다.
-                UpdateBubbleShapePath(_selectedBubble);
-            },
+            c => ApplyBubbleRunStyle(
+                r => r.Color = ColorToHex(c),
+                () =>
+                {
+                    _selectedBubble!.TextBlock.Fill = new SolidColorBrush(c);
+                    // 집중선/효과선은 선 색이 글자색을 따르므로 즉시 갱신한다.
+                    UpdateBubbleShapePath(_selectedBubble);
+                }),
             Colors.Black);
     }
 
@@ -568,7 +631,9 @@ public partial class MainWindow : Window
     {
         OnBubbleColorComboChanged(BubbleStrokeColorComboBox,
             () => (_selectedBubble!.TextBlock.Stroke as SolidColorBrush)?.Color ?? Colors.Transparent,
-            c => _selectedBubble!.TextBlock.Stroke = new SolidColorBrush(c),
+            c => ApplyBubbleRunStyle(
+                r => r.OutlineColor = ColorToHex(c),
+                () => _selectedBubble!.TextBlock.Stroke = new SolidColorBrush(c)),
             Colors.Transparent);
     }
 
@@ -752,6 +817,13 @@ public partial class MainWindow : Window
         SetShapeOptionVisible(BubbleShapeCountText, BubbleShapeCountSlider, hasCountAndIrregularity);
         SetShapeOptionVisible(BubbleShapeIrregularityText, BubbleShapeIrregularitySlider, hasCountAndIrregularity);
         SetShapeOptionVisible(BubbleShapeWidthVarText, BubbleShapeWidthVarSlider, hasWidthVar);
+
+        // 꼬리는 본체가 있는 모양(원형/사각·구름폭발·플래시)에만 의미가 있다. 집중선·속도선·테두리 없음은 꼬리 섹션을 숨긴다.
+        var hasTail = shape is BubbleShape.RoundRect or BubbleShape.CloudExplosion or BubbleShape.Flash;
+        if (BubbleTailSectionBorder != null)
+        {
+            BubbleTailSectionBorder.Visibility = hasTail ? Visibility.Visible : Visibility.Collapsed;
+        }
     }
 
     // 강도 슬라이더의 모양별 표시 이름(속도선은 방향이라 '회전').
@@ -855,9 +927,42 @@ public partial class MainWindow : Window
             return;
         }
 
-        _selectedBubble.TextBlock.Text = SelectedBubbleTextBox.Text;
+        var tb = _selectedBubble.TextBlock;
+        var oldText = tb.Text ?? string.Empty;
+        // 편집을 '한 구간 치환'으로 보고 구간 서식을 보존한다(본문 텍스트와 동일 로직 재사용).
+        tb.StyledRuns = SpliceRuns(tb.StyledRuns ?? MakeDefaultRuns(oldText), oldText, SelectedBubbleTextBox.Text);
+        tb.Text = SelectedBubbleTextBox.Text;
+        _historyDirty = true;
         // 텍스트가 길어지면 말풍선에 맞춰 글자 크기를 자동 축소한다.
         ApplyBubbleAutoFit(_selectedBubble);
+    }
+
+    // 선택 구간이 있으면 그 구간의 런에 set을 적용하고, 없으면 말풍선 전체 기본값(setBase)을 바꾼다.
+    private void ApplyBubbleRunStyle(System.Action<FlowTextRun> set, System.Action setBase)
+    {
+        if (_selectedBubble == null)
+        {
+            return;
+        }
+
+        var tb = _selectedBubble.TextBlock;
+        if (SelectedBubbleTextBox != null && SelectedBubbleTextBox.SelectionLength > 0)
+        {
+            var runs = tb.StyledRuns is { Count: > 0 } ? tb.StyledRuns : MakeDefaultRuns(tb.Text);
+            var start = SelectedBubbleTextBox.SelectionStart;
+            var len = SelectedBubbleTextBox.SelectionLength;
+            tb.StyledRuns = ApplyStyleToRange(runs, start, start + len, set);
+            _historyDirty = true;
+            UpdateBubbleGeometry(_selectedBubble);
+            SelectedBubbleTextBox.Focus();
+            SelectedBubbleTextBox.Select(start, len); // 선택 유지(연이어 다른 서식 적용 가능).
+        }
+        else
+        {
+            setBase();
+            _historyDirty = true;
+            UpdateBubbleGeometry(_selectedBubble);
+        }
     }
 
 }

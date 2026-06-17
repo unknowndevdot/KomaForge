@@ -191,14 +191,21 @@ public partial class MainWindow : Window
         var w = bubble.Container.Width;
         var h = bubble.Container.Height;
         var lineColor = bubble.TextBlock.Fill;
+        var warp = bubble.WarpShape && HasCornerWarp(bubble.CornerOffsets);
+        var o = bubble.CornerOffsets;
 
         foreach (var (inner, edge, fadeStart, fadeEnd) in ConcentrationLineEndpoints(w, h, bubble.ShapeCount, bubble.ShapeStrength, bubble.ShapeIrregularity))
         {
+            // 모서리 조절(도형): 선 양 끝점을 사변형으로 워프한다(직선이라 끝점만 옮겨도 충분).
+            var a = warp ? WarpPoint(inner.X, inner.Y, w, h, o) : inner;
+            var b = warp ? WarpPoint(edge.X, edge.Y, w, h, o) : edge;
+            var fs = warp ? WarpPoint(fadeStart.X, fadeStart.Y, w, h, o) : fadeStart;
+            var fe = warp ? WarpPoint(fadeEnd.X, fadeEnd.Y, w, h, o) : fadeEnd;
             var path = new System.Windows.Shapes.Path
             {
-                Data = new LineGeometry(inner, edge),
+                Data = new LineGeometry(a, b),
                 // 중심 쪽(fadeStart 이전) 투명 → 바깥(fadeEnd 이후) 불투명.
-                Stroke = CreateDirectionFadeBrush(lineColor, fadeStart, fadeEnd),
+                Stroke = CreateDirectionFadeBrush(lineColor, fs, fe),
                 StrokeThickness = 1.6,
                 IsHitTestVisible = false
             };
@@ -272,6 +279,8 @@ public partial class MainWindow : Window
         var w = bubble.Container.Width;
         var h = bubble.Container.Height;
         var lineColor = bubble.TextBlock.Fill;
+        var warp = bubble.WarpShape && HasCornerWarp(bubble.CornerOffsets);
+        var o = bubble.CornerOffsets;
 
         foreach (var (baseP, tip) in EffectLineEndpoints(w, h, bubble.ShapeCount, bubble.ShapeStrength, bubble.ShapeIrregularity))
         {
@@ -281,11 +290,14 @@ public partial class MainWindow : Window
                 continue;
             }
 
+            // 모서리 조절(도형): 클립된 양 끝점을 사변형으로 워프한다.
+            var a = warp ? WarpPoint(c0.X, c0.Y, w, h, o) : c0;
+            var b = warp ? WarpPoint(c1.X, c1.Y, w, h, o) : c1;
             var path = new System.Windows.Shapes.Path
             {
-                Data = new LineGeometry(c0, c1),
+                Data = new LineGeometry(a, b),
                 // 팁(c1) 투명 → 베이스(c0) 불투명. 보이는 구간 기준이라 선마다 자기 시작점부터 페이드된다.
-                Stroke = CreateDirectionFadeBrush(lineColor, c1, c0),
+                Stroke = CreateDirectionFadeBrush(lineColor, b, a),
                 StrokeThickness = 1.6,
                 IsHitTestVisible = false
             };
