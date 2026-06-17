@@ -321,6 +321,17 @@ public partial class MainWindow : Window
         FlowFontFamilyComboBox.SelectedIndex = -1; // 기본 글꼴.
     }
 
+    // 텍스트 모드 ON/OFF 토글(Ctrl+T). 숨겨진 체크박스를 통해 섹션 표시·본문 오버레이를 함께 갱신.
+    private void ToggleTextMode()
+    {
+        if (FlowTextModeCheckBox == null)
+        {
+            return;
+        }
+        FlowTextModeCheckBox.IsChecked = !(FlowTextModeCheckBox.IsChecked == true);
+        UpdateStatus(FlowTextModeCheckBox.IsChecked == true ? "텍스트 모드 ON" : "텍스트 모드 OFF");
+    }
+
     private void FlowTextModeCheckBox_Changed(object sender, RoutedEventArgs e)
     {
         // 섹션 표시는 로딩 중에도 상태에 맞춰 갱신한다(체크박스가 토글되는 즉시 반영).

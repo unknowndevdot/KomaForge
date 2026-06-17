@@ -1300,51 +1300,6 @@ public partial class MainWindow : Window
         return row;
     }
 
-    // 새로 만들기(텍스트): 노벨 뷰어용 템플릿. 텍스트 모드 ON, 페이지·칸 배경 투명, 페이지 크기와 같은 1칸,
-    // 칸 구성 1 / 여백 0 / 간격 14, 텍스트 뒷배경 검정으로 시작한다.
-    private void NewProjectText_Click(object sender, RoutedEventArgs e)
-    {
-        if (MessageBox.Show(this, "현재 작업을 지우고 새 텍스트 프로젝트를 만듭니다. 계속할까요?", "새로 만들기(텍스트)",
-                MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
-        {
-            return;
-        }
-
-        ClearSelection();
-        ComicTitleTextBox.Text = string.Empty;
-        _projectFilePath = null;
-        _projectBaseDirectory = null;
-
-        // 칸 구성 1 / 여백 0 / 간격 14.
-        LayoutPatternTextBox.Text = "1";
-        AutoMarginTextBox.Text = "0";
-        AutoGutterTextBox.Text = "14";
-
-        // 배경색 '없음'(투명)인 페이지 하나로 시작.
-        ReplacePages(new[] { new ComicPageData { Name = "Page 1", BackgroundColor = TransparentHex } });
-        _currentPageIndex = 0;
-        LoadPage(_pages[0]);
-
-        // 텍스트 모드 ON + 뒷배경 검정(나머지 서식은 기본값).
-        ApplyFlowText(new FlowTextData { Enabled = true, BackdropColor = "#000000" });
-
-        // 페이지 크기와 같은 1칸을 만들고, 칸 배경도 '없음'(투명)으로 둔다.
-        CreateLayoutFromPattern("1");
-        foreach (var panel in _panels)
-        {
-            panel.QuadFill.Fill = new SolidColorBrush(Colors.Transparent);
-        }
-
-        ClearSelection();
-        UpdatePageList();
-
-        ResetHistoryBaseline();
-        _undoStack.Clear();
-        _redoStack.Clear();
-        UpdateUndoRedoButtons();
-        UpdateStatus("새 텍스트 프로젝트를 만들었습니다.");
-    }
-
     private void LoadProject_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new OpenFileDialog

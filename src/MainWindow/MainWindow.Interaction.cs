@@ -237,9 +237,11 @@ public partial class MainWindow : Window
             case ComicPanel p:
                 if (!(_selectionKind == SelectionKind.Panel && p == _selectedPanel))
                 {
+                    // 호버 해제 시 칸의 실제 테두리색으로 복원한다(검정으로 고정하면 커스텀 색이 지워짐).
+                    var borderBrush = new SolidColorBrush(p.BorderColor);
                     foreach (var line in p.QuadBorderLines)
                     {
-                        line.Stroke = Brushes.Black;
+                        line.Stroke = borderBrush;
                     }
                 }
                 break;
@@ -756,8 +758,21 @@ public partial class MainWindow : Window
 
         var canvas = (Canvas)bubble.Container.Parent;
         var position = e.GetPosition(canvas);
-        Canvas.SetLeft(bubble.Container, position.X - _dragStart.X);
-        Canvas.SetTop(bubble.Container, position.Y - _dragStart.Y);
+        var x = position.X - _dragStart.X;
+        var y = position.Y - _dragStart.Y;
+
+        // 소유 칸의 변·중앙에 스냅(Alt로 일시 해제).
+        if ((Keyboard.Modifiers & ModifierKeys.Alt) == 0)
+        {
+            (x, y) = SnapBubblePosition(bubble, x, y);
+        }
+        else
+        {
+            ClearSnapGuides();
+        }
+
+        Canvas.SetLeft(bubble.Container, x);
+        Canvas.SetTop(bubble.Container, y);
 
         var relative = GetBubblePositionInOwnerPanel(bubble);
         _isLoadingInspector = true;
@@ -991,6 +1006,7 @@ public partial class MainWindow : Window
     private void EndBubbleDrag(SpeechBubble bubble)
     {
         _isDraggingBubble = false;
+        ClearSnapGuides(); // 드래그 끝나면 스냅 가이드 선 숨김.
 
         if (bubble.Container.IsMouseCaptured)
         {

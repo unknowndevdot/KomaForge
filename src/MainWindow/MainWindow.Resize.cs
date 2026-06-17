@@ -180,6 +180,7 @@ public partial class MainWindow : Window
                     _resizeStartAspect = h > 0 ? _selectedBubble.Container.Width / h : 1;
                 };
                 handle.DragDelta += (_, e) => { if (_selectedBubble != null) ResizeBubbleEdge(_selectedBubble, edge, e); };
+                handle.DragCompleted += (_, _) => ClearSnapGuides();
                 _bubbleResizeHandles[i] = handle;
             }
         }
@@ -218,6 +219,16 @@ public partial class MainWindow : Window
         var rect = new Rect(pos.X, pos.Y, oldWidth, oldHeight);
         var nb = ComputeResizedBounds(rect, edge, e.HorizontalChange, e.VerticalChange,
             BubbleWidthSlider.Minimum, BubbleHeightSlider.Minimum, ShiftHeld, _resizeStartAspect);
+
+        // 소유 칸의 변에 스냅(Alt로 일시 해제).
+        if ((Keyboard.Modifiers & ModifierKeys.Alt) == 0)
+        {
+            nb = SnapBubbleBounds(bubble, edge, nb, ShiftHeld);
+        }
+        else
+        {
+            ClearSnapGuides();
+        }
 
         bubble.Container.Width = nb.Width;
         bubble.Container.Height = nb.Height;
@@ -597,6 +608,36 @@ public partial class MainWindow : Window
             : SnapBoundsFree(edge, b, xs, ys, MinImageSize, MinImageSize);
     }
 
+    // 말풍선 리사이즈를 소유 칸의 4변에 스냅한다. 입력 bounds는 칸-로컬, 스냅·가이드는 페이지 좌표로 처리 후 되돌린다.
+    private Rect SnapBubbleBounds(SpeechBubble bubble, ResizeEdge edge, Rect bLocal, bool keepAspect)
+    {
+        if (bLocal.Width <= 0 || bLocal.Height <= 0)
+        {
+            return bLocal;
+        }
+
+        var origin = BubbleOverlayOrigin(bubble);
+        var frame = bubble.OwnerPanel.Frame;
+        var xs = new List<double> { origin.X, origin.X + frame.Width };
+        var ys = new List<double> { origin.Y, origin.Y + frame.Height };
+
+        var pageRect = new Rect(bLocal.X + origin.X, bLocal.Y + origin.Y, bLocal.Width, bLocal.Height);
+        var minW = BubbleWidthSlider.Minimum;
+        var minH = BubbleHeightSlider.Minimum;
+        var snapped = keepAspect
+            ? SnapBoundsKeepAspect(edge, pageRect, xs, ys, minW, minH)
+            : SnapBoundsFree(edge, pageRect, xs, ys, minW, minH);
+
+        return new Rect(snapped.X - origin.X, snapped.Y - origin.Y, snapped.Width, snapped.Height);
+    }
+
+    // 말풍선이 든 오버레이(칸 안)의 원점을 페이지(PageOverlay) 좌표로 환산한다(스냅 후보·가이드 좌표 변환용).
+    private Point BubbleOverlayOrigin(SpeechBubble bubble)
+    {
+        var overlay = bubble.IsCropped ? bubble.OwnerPanel.Overlay : bubble.OwnerPanel.FreeOverlay;
+        return overlay.TransformToVisual(PageOverlay).Transform(new Point(0, 0));
+    }
+
     // Uniform으로 콘텐츠 박스(cw×ch)에 맞춰 실제 렌더되는 이미지 크기(콘텐츠 좌표, 스케일 적용 전).
     private static (double W, double H) GetImageRenderedSize(PanelImage image)
     {
@@ -747,6 +788,30 @@ public partial class MainWindow : Window
         if (TrySnapEdgePair(y, y + h, ys, PanelSnapThreshold, out var ny, out var cy)) { y = ny; gy = cy; }
         ShowSnapGuides(gx, gy);
         return (x, y);
+    }
+
+    // 말풍선 이동 시 소유 칸의 변·중앙에 스냅한다. 입력/반환은 칸-로컬, 스냅·가이드는 페이지 좌표로 처리.
+    private (double X, double Y) SnapBubblePosition(SpeechBubble bubble, double x, double y)
+    {
+        var origin = BubbleOverlayOrigin(bubble);
+        var frame = bubble.OwnerPanel.Frame;
+        double pw = frame.Width, ph = frame.Height;
+        double w = bubble.Container.Width, h = bubble.Container.Height;
+        var xs = new List<double> { origin.X, origin.X + pw };
+        var ys = new List<double> { origin.Y, origin.Y + ph };
+
+        var px = x + origin.X;
+        var py = y + origin.Y;
+        double? gx = null, gy = null;
+
+        if (TrySnapEdgePair(px, px + w, xs, PanelSnapThreshold, out var nx, out var cx)) { px = nx; gx = cx; }
+        else if (Math.Abs(px + w / 2 - (origin.X + pw / 2)) <= PanelSnapThreshold) { px = origin.X + pw / 2 - w / 2; gx = origin.X + pw / 2; } // 가로 중앙
+
+        if (TrySnapEdgePair(py, py + h, ys, PanelSnapThreshold, out var ny, out var cy)) { py = ny; gy = cy; }
+        else if (Math.Abs(py + h / 2 - (origin.Y + ph / 2)) <= PanelSnapThreshold) { py = origin.Y + ph / 2 - h / 2; gy = origin.Y + ph / 2; } // 세로 중앙
+
+        ShowSnapGuides(gx, gy);
+        return (px - origin.X, py - origin.Y);
     }
 
     // start(좌/상)·end(우/하) 두 변 중 후보에 가장 가까운 쪽으로 스냅한 새 start 좌표.

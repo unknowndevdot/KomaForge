@@ -219,7 +219,7 @@ public partial class MainWindow : Window
             UpdateHoverTooltip(Mouse.DirectlyOver as DependencyObject);
         }
 
-        // 사용자 지정 가능한 명령 단축키(불러오기/저장/실행취소·다시실행/잘라내기·복사·붙여넣기/리셋/잠금).
+        // 사용자 지정 가능한 명령 단축키(불러오기/저장/실행취소·다시실행/잘라내기·복사·붙여넣기/리셋/잠금/텍스트 모드).
         if (TryRunCustomShortcut(e))
         {
             e.Handled = true;

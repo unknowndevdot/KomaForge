@@ -23,6 +23,7 @@ public partial class MainWindow : Window
         ("paste", "붙여넣기",       ModifierKeys.Control, Key.V),
         ("reset", "선택 리셋",      ModifierKeys.Control, Key.R),
         ("lock",  "선택 잠금/해제", ModifierKeys.None,    Key.L),
+        ("toggletext", "텍스트 모드", ModifierKeys.Control, Key.T),
         ("preferences", "환경설정", ModifierKeys.Control, Key.OemComma),
     };
 
@@ -92,6 +93,7 @@ public partial class MainWindow : Window
             case "paste": PasteClipboard(); break;
             case "reset": ResetSelectedToDefault(); break;
             case "lock": ToggleSelectedLock(); break;
+            case "toggletext": ToggleTextMode(); break;
             case "preferences": ShowPreferencesDialog(); break;
         }
     }

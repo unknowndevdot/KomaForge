@@ -684,11 +684,11 @@ public partial class MainWindow : Window
     {
         foreach (var panel in _panels)
         {
-            // 칸 테두리(4선)는 '칸'이 활성 선택일 때만 강조한다(잠금 시 빨강). 비선택은 검정.
+            // 칸 테두리(4선)는 '칸'이 활성 선택일 때만 강조한다(잠금 시 빨강). 비선택은 칸의 실제 테두리색.
             var isSelectedPanel = _selectionKind == SelectionKind.Panel && panel == _selectedPanel;
             var borderBrush = isSelectedPanel
                 ? (panel.IsLocked ? SelectionLockedBrush : SelectionAccentBrush)
-                : Brushes.Black;
+                : new SolidColorBrush(panel.BorderColor);
             foreach (var line in panel.QuadBorderLines)
             {
                 line.Stroke = borderBrush;

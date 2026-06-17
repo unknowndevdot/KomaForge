@@ -11,7 +11,6 @@
         <Menu DockPanel.Dock="Top" Background="#F3F0EA">
             <MenuItem Header="파일(_F)">
                 <MenuItem x:Name="NewMenuItem" Header="새로 만들기" InputGestureText="Ctrl+N" Click="NewProject_Click" />
-                <MenuItem x:Name="NewTextMenuItem" Header="새로 만들기 (텍스트 템플릿)" Click="NewProjectText_Click" />
                 <MenuItem x:Name="OpenMenuItem" Header="불러오기..." InputGestureText="Ctrl+O" Click="LoadProject_Click" />
                 <MenuItem x:Name="SaveMenuItem" Header="저장" InputGestureText="Ctrl+S" Click="SaveMenuItem_Click" />
                 <MenuItem Header="다른 이름으로 저장..." Click="SaveProject_Click" />
