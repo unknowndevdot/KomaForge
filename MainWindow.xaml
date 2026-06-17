@@ -1,7 +1,7 @@
 <Window x:Class="KomaForge.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="KomaForge v0.1.1 - Comic Layout"
+        Title="KomaForge v0.1.2 - Comic Layout"
         Width="1280"
         Height="820"
         MinWidth="980"
