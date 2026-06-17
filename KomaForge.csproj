@@ -6,7 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <ApplicationIcon />
-    <Version>0.1.1</Version>
+    <Version>0.1.2</Version>
     <Product>KomaForge</Product>
     <Description>망가 페이지 에디터</Description>
     <Authors>unknowndevdot</Authors>

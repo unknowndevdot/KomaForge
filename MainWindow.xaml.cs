@@ -1246,7 +1246,7 @@ public partial class MainWindow : Window
     }
 
     // 앱 버전(창 제목 등에 표시).
-    private const string AppVersion = "v0.1.1";
+    private const string AppVersion = "v0.1.2";
 
     private void UpdateWindowTitle()
     {
