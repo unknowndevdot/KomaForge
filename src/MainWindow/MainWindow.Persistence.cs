@@ -749,7 +749,7 @@ public partial class MainWindow : Window
         var visual = new DrawingVisual();
         using (var context = visual.RenderOpen())
         {
-            // 텍스트 모드의 '뒷배경색'을 페이지보다 먼저(맨 뒤) 깐다. 페이지 배경이 불투명하면 그 위가 덮여 안 보이고,
+            // 비주얼 노벨 모드의 '뒷배경색'을 페이지보다 먼저(맨 뒤) 깐다. 페이지 배경이 불투명하면 그 위가 덮여 안 보이고,
             // 페이지 배경이 투명이면 이 색이 그대로 보인다('없음'(알파 0)이면 투명 유지).
             if (_flow.Enabled)
             {
@@ -1061,7 +1061,9 @@ public partial class MainWindow : Window
             AutoGutter = ParseDoubleOr(AutoGutterTextBox.Text, 14),
             CurrentPageIndex = _currentPageIndex,
             Pages = CaptureProjectPages(Path.GetDirectoryName(fileName)),
-            FlowText = _flow.Clone()
+            FlowText = _flow.Clone(),
+            VnTemplates = _vnTemplates.Select(t => CopyPageForStorage(t, Path.GetDirectoryName(fileName))).ToList(),
+            VnEditingIndex = _editingTemplate != null ? _vnTemplates.IndexOf(_editingTemplate) : -1
         };
 
         try
@@ -1090,6 +1092,7 @@ public partial class MainWindow : Window
         ComicTitleTextBox.Text = string.Empty;
         _projectFilePath = null;
         _projectBaseDirectory = null;
+        _vnTemplates.Clear();
 
         // 선택한 칸 구성 / 여백 / 간격을 입력칸에도 반영(이후 '칸 구성 적용' 등과 일관).
         LayoutPatternTextBox.Text = pattern;
@@ -1329,6 +1332,11 @@ public partial class MainWindow : Window
             AutoMarginTextBox.Text = $"{project.AutoMargin:0}";
             AutoGutterTextBox.Text = $"{project.AutoGutter:0}";
             ReplacePages(project.Pages);
+            _vnTemplates.Clear();
+            foreach (var t in project.VnTemplates)
+            {
+                _vnTemplates.Add(t);
+            }
             _currentPageIndex = Math.Clamp(project.CurrentPageIndex, 0, _pages.Count - 1);
             LoadPage(_pages[_currentPageIndex]);
             ApplyFlowText(project.FlowText); // 본문 텍스트·서식 복원(인스펙터 갱신 + 재분할).

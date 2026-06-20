@@ -195,6 +195,7 @@ public partial class MainWindow : Window
         UpdateBubbleList(_selectedPanel);
         SelectBubble(bubble);
         ScrollInspectorToSection();
+        RefreshCurrentPageLabel(); // 비주얼 노벨 모드 페이지 목록 요약 갱신.
         UpdateStatus($"{_selectedPanel.Number}번 칸에 말풍선을 추가했습니다.");
     }
 
@@ -935,6 +936,7 @@ public partial class MainWindow : Window
         _historyDirty = true;
         // 텍스트가 길어지면 말풍선에 맞춰 글자 크기를 자동 축소한다.
         ApplyBubbleAutoFit(_selectedBubble);
+        RefreshCurrentPageLabel(); // 비주얼 노벨 모드면 페이지 목록 요약 즉시 갱신.
     }
 
     // 선택 구간이 있으면 그 구간의 런에 set을 적용하고, 없으면 말풍선 전체 기본값(setBase)을 바꾼다.

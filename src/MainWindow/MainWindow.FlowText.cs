@@ -220,7 +220,7 @@ public partial class MainWindow : Window
         RebuildFlowDocument();
     }
 
-    // 페이지 뒤(PageFrame)의 배경을 정한다. 텍스트 모드 ON이면 단일 뒷배경색, OFF면 페이지 색(기존 동작).
+    // 페이지 뒤(PageFrame)의 배경을 정한다. 비주얼 노벨 모드 ON이면 단일 뒷배경색, OFF면 페이지 색(기존 동작).
     // PageFrame.Background의 유일한 설정 지점(ApplyPageBackground도 여기로 위임).
     private void ApplyBackdrop()
     {
@@ -281,6 +281,7 @@ public partial class MainWindow : Window
         _isLoadingInspector = true;
         FlowTextModeCheckBox.IsChecked = _flow.Enabled;
         FlowTextSectionBorder.Visibility = _flow.Enabled ? Visibility.Visible : Visibility.Collapsed;
+        SetVnSectionVisible(_flow.Enabled);
         FlowTextBox.Text = _flow.Text;
         // 텍스트박스가 줄바꿈을 \r\n으로 정규화할 수 있으므로, 보이는 텍스트에 런·_flow.Text를 맞춘다.
         if (RunsText(_flow.Runs) != FlowTextBox.Text)
@@ -321,7 +322,7 @@ public partial class MainWindow : Window
         FlowFontFamilyComboBox.SelectedIndex = -1; // 기본 글꼴.
     }
 
-    // 텍스트 모드 ON/OFF 토글(Ctrl+T). 숨겨진 체크박스를 통해 섹션 표시·본문 오버레이를 함께 갱신.
+    // 비주얼 노벨 모드 ON/OFF 토글(Ctrl+T). 숨겨진 체크박스를 통해 섹션 표시·본문 오버레이를 함께 갱신.
     private void ToggleTextMode()
     {
         if (FlowTextModeCheckBox == null)
@@ -329,7 +330,7 @@ public partial class MainWindow : Window
             return;
         }
         FlowTextModeCheckBox.IsChecked = !(FlowTextModeCheckBox.IsChecked == true);
-        UpdateStatus(FlowTextModeCheckBox.IsChecked == true ? "텍스트 모드 ON" : "텍스트 모드 OFF");
+        UpdateStatus(FlowTextModeCheckBox.IsChecked == true ? "비주얼 노벨 모드 ON" : "비주얼 노벨 모드 OFF");
     }
 
     private void FlowTextModeCheckBox_Changed(object sender, RoutedEventArgs e)
@@ -340,6 +341,7 @@ public partial class MainWindow : Window
             FlowTextSectionBorder.Visibility =
                 FlowTextModeCheckBox.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         }
+        SetVnSectionVisible(FlowTextModeCheckBox.IsChecked == true);
 
         if (!_flowReady || _isLoadingInspector)
         {
@@ -348,8 +350,30 @@ public partial class MainWindow : Window
 
         _flow.Enabled = FlowTextModeCheckBox.IsChecked == true;
         _historyDirty = true;
+        if (!_flow.Enabled)
+        {
+            LeaveTemplateEditing(); // VN 모드를 끄면 템플릿 편집을 종료하고 일반 페이지로 복귀.
+        }
         ApplyBackdrop();       // ON/OFF에 따라 페이지 뒤 배경색을 켜거나 흰색으로 되돌린다.
         RebuildFlowDocument(); // ON/OFF에 따라 본문 오버레이를 켜거나 지운다.
+
+        // 페이지 목록 라벨을 모드에 맞게 전환(현재 페이지 말풍선을 먼저 반영).
+        SaveCurrentPageState();
+        foreach (var p in _pages)
+        {
+            p.VisualNovelMode = _flow.Enabled;
+        }
+    }
+
+    // 비주얼 노벨 모드에서 현재 페이지 말풍선 변경 시 목록 요약을 즉시 갱신한다.
+    private void RefreshCurrentPageLabel()
+    {
+        if (!_flow.Enabled || _currentPageIndex < 0 || _currentPageIndex >= _pages.Count)
+        {
+            return;
+        }
+        SaveCurrentPageState();
+        _pages[_currentPageIndex].RefreshDisplayLabel();
     }
 
     private void FlowTextBox_TextChanged(object sender, TextChangedEventArgs e)

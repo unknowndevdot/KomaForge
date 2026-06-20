@@ -621,6 +621,15 @@ public partial class MainWindow : Window
         var xs = new List<double> { origin.X, origin.X + frame.Width };
         var ys = new List<double> { origin.Y, origin.Y + frame.Height };
 
+        // 크롭 OFF면 말풍선이 칸 밖으로 넘칠 수 있으므로 페이지의 끝(0·페이지 크기)에도 스냅한다.
+        if (!bubble.IsCropped)
+        {
+            xs.Add(0);
+            xs.Add(_pageWidth);
+            ys.Add(0);
+            ys.Add(_pageHeight);
+        }
+
         var pageRect = new Rect(bLocal.X + origin.X, bLocal.Y + origin.Y, bLocal.Width, bLocal.Height);
         var minW = BubbleWidthSlider.Minimum;
         var minH = BubbleHeightSlider.Minimum;
@@ -799,6 +808,15 @@ public partial class MainWindow : Window
         double w = bubble.Container.Width, h = bubble.Container.Height;
         var xs = new List<double> { origin.X, origin.X + pw };
         var ys = new List<double> { origin.Y, origin.Y + ph };
+
+        // 크롭 OFF면 페이지 끝(0·페이지 크기)에도 스냅한다.
+        if (!bubble.IsCropped)
+        {
+            xs.Add(0);
+            xs.Add(_pageWidth);
+            ys.Add(0);
+            ys.Add(_pageHeight);
+        }
 
         var px = x + origin.X;
         var py = y + origin.Y;

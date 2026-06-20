@@ -57,6 +57,9 @@ public partial class MainWindow : Window
         public List<string> PageJsons = new();
         // 프로젝트 전체 본문 텍스트(노벨 뷰어)의 직렬화 JSON. 페이지와 무관한 단일 객체.
         public string FlowJson = "{}";
+        // 비주얼 노벨 템플릿 목록 JSON과, 그 시점에 편집 중이던 템플릿 인덱스(-1이면 일반 페이지 편집).
+        public string VnTemplatesJson = "[]";
+        public int VnEditingIndex = -1;
     }
 
     private readonly List<ComicPanel> _panels = new();
@@ -94,6 +97,12 @@ public partial class MainWindow : Window
     // 페이지 목록(PageListBox.ItemsSource로 바인딩). ObservableCollection이라 추가/삭제/이동이
     // 목록 전체 재구성 없이 '바뀐 항목만' 증분 갱신된다(스크롤·선택 보존, 페이지 수와 무관한 비용).
     private readonly ObservableCollection<ComicPageData> _pages = new();
+    // 비주얼 노벨 생성용 템플릿 페이지(일반 페이지와 별개, VN 섹션 목록에 바인딩).
+    private readonly ObservableCollection<ComicPageData> _vnTemplates = new();
+    // null이면 일반 페이지를 편집 중, 아니면 이 VN 템플릿을 캔버스에서 편집 중(SaveCurrentPageState가 여기로 저장).
+    private ComicPageData? _editingTemplate;
+    // 일반 페이지 목록 ↔ VN 템플릿 목록 선택 동기화 중 재진입 방지.
+    private bool _isSwitchingEditTarget;
     private int _currentPageIndex;
     private string? _projectBaseDirectory;
     // 현재 불러왔거나 저장한 프로젝트 파일 전체 경로(Ctrl+S 덮어쓰기 대상). 없으면 다른 이름으로 저장.
@@ -156,6 +165,7 @@ public partial class MainWindow : Window
         InitColorCombos(); // 팔레트 + 최근색 + '직접 지정…' 으로 색 콤보 구성(LoadWindowSettings 이후라 최근색 반영).
         InitBubbleFontCombo(); // 시스템 글꼴 목록으로 말풍선 글꼴 콤보 구성.
         InitFlowFontCombo();   // 시스템 글꼴 목록으로 본문 텍스트 글꼴 콤보 구성.
+        VnTemplateListBox.ItemsSource = _vnTemplates; // 비주얼 노벨 템플릿 목록 바인딩.
         _flowReady = true;     // 모든 컨트롤이 만들어졌으므로 본문 텍스트 핸들러를 활성화.
         Closing += (_, _) =>
         {
@@ -219,7 +229,7 @@ public partial class MainWindow : Window
             UpdateHoverTooltip(Mouse.DirectlyOver as DependencyObject);
         }
 
-        // 사용자 지정 가능한 명령 단축키(불러오기/저장/실행취소·다시실행/잘라내기·복사·붙여넣기/리셋/잠금/텍스트 모드).
+        // 사용자 지정 가능한 명령 단축키(불러오기/저장/실행취소·다시실행/잘라내기·복사·붙여넣기/리셋/잠금/비주얼 노벨 모드).
         if (TryRunCustomShortcut(e))
         {
             e.Handled = true;
@@ -339,7 +349,9 @@ public partial class MainWindow : Window
 
     private void PageListBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_isUpdatingPageList || PageListBox.SelectedIndex < 0 || PageListBox.SelectedIndex == _currentPageIndex)
+        // 템플릿 편집 중이면 같은 인덱스를 골라도 일반 페이지 편집으로 복귀해야 하므로 인덱스 동일 가드는 그때 건너뛴다.
+        if (_isUpdatingPageList || PageListBox.SelectedIndex < 0
+            || (_editingTemplate == null && PageListBox.SelectedIndex == _currentPageIndex))
         {
             return;
         }
@@ -348,7 +360,11 @@ public partial class MainWindow : Window
         var fromClick = Mouse.LeftButton == MouseButtonState.Pressed
             || (PageSectionBorder != null && PageSectionBorder.IsKeyboardFocusWithin);
 
-        SaveCurrentPageState();
+        SaveCurrentPageState();          // 직전 편집 대상(일반 페이지 또는 템플릿) 저장.
+        _editingTemplate = null;         // 일반 페이지 편집으로 복귀.
+        _isSwitchingEditTarget = true;
+        VnTemplateListBox.SelectedIndex = -1; // VN 템플릿 선택 해제.
+        _isSwitchingEditTarget = false;
         _currentPageIndex = PageListBox.SelectedIndex;
         LoadPage(_pages[_currentPageIndex]);
         UpdateStatus($"{_pages[_currentPageIndex].Name} 페이지를 열었습니다.");
@@ -526,22 +542,52 @@ public partial class MainWindow : Window
         _historyDirty = true;
     }
 
+    // 추가: 현재 페이지 아래에 기본 칸 구성의 새 페이지를 만든다(현재 페이지 크기만 따름, 내용 복사 없음).
     private void AddPage_Click(object sender, RoutedEventArgs e)
     {
+        LeaveTemplateEditing(); // 템플릿 편집 중이었다면 일반 페이지 편집으로 복귀 후 진행.
         SaveCurrentPageState();
         _historyStructuralPending = true; // 페이지 추가: 다음 캡처에서 전체 재직렬화.
-        _pages.Add(new ComicPageData { Name = $"Page {_pages.Count + 1}", PageWidth = _pageWidth, PageHeight = _pageHeight });
-        _currentPageIndex = _pages.Count - 1;
+
+        var insertAt = (_currentPageIndex >= 0 && _currentPageIndex < _pages.Count) ? _currentPageIndex + 1 : _pages.Count;
+        _pages.Insert(insertAt, new ComicPageData { Name = $"Page {_pages.Count + 1}", PageWidth = _pageWidth, PageHeight = _pageHeight });
+        _currentPageIndex = insertAt;
         LoadPage(_pages[_currentPageIndex]);
-        // 새 페이지를 기본 칸 구성으로 자동 채운다(패턴이 비어 있으면 빈 페이지 유지).
-        CreateLayoutFromPattern(LayoutPatternTextBox.Text);
+        CreateLayoutFromPattern(LayoutPatternTextBox.Text); // 기본 칸 구성으로 채운다(패턴이 비어 있으면 빈 페이지).
         ClearSelection();
         UpdatePageList();
-        UpdateStatus("새 페이지를 기본 칸 구성으로 추가했습니다.");
+        UpdateStatus("새 페이지를 추가했습니다.");
+    }
+
+    // 복제: 현재 페이지를 바로 아래에 통째로 복제한다(크기·배경·칸·내용 등 모든 설정).
+    private void DuplicatePage_Click(object sender, RoutedEventArgs e)
+    {
+        LeaveTemplateEditing(); // 템플릿 편집 중이었다면 일반 페이지 편집으로 복귀 후 진행.
+        if (_currentPageIndex < 0 || _currentPageIndex >= _pages.Count)
+        {
+            AddPage_Click(sender, e); // 복제할 현재 페이지가 없으면 단순 추가.
+            return;
+        }
+
+        SaveCurrentPageState();
+        _historyStructuralPending = true;
+
+        // JSON 왕복으로 깊은 복사해 페이지끼리 데이터를 공유하지 않게 한다.
+        var src = _pages[_currentPageIndex];
+        var clone = JsonSerializer.Deserialize<ComicPageData>(JsonSerializer.Serialize(src))!;
+        clone.Name = $"Page {_pages.Count + 1}"; // 순번만 늘린다('복사' 누적 방지).
+        var insertAt = _currentPageIndex + 1;
+        _pages.Insert(insertAt, clone);
+        _currentPageIndex = insertAt;
+        LoadPage(_pages[_currentPageIndex]);
+        ClearSelection();
+        UpdatePageList();
+        UpdateStatus("현재 페이지를 아래에 복제했습니다.");
     }
 
     private void DeletePage_Click(object sender, RoutedEventArgs e)
     {
+        LeaveTemplateEditing(); // 템플릿 편집 중이었다면 일반 페이지 편집으로 복귀 후 진행.
         if (_pages.Count <= 1)
         {
             UpdateStatus("페이지는 최소 1개가 필요합니다.");
@@ -568,6 +614,7 @@ public partial class MainWindow : Window
 
     private void MoveCurrentPage(int direction)
     {
+        LeaveTemplateEditing(); // 템플릿 편집 중이었다면 일반 페이지 편집으로 복귀 후 진행.
         var target = _currentPageIndex + direction;
         if (_currentPageIndex < 0 || target < 0 || target >= _pages.Count)
         {
@@ -685,7 +732,7 @@ public partial class MainWindow : Window
         }
 
         // PageFrame(페이지 뒤 레이어)은 ApplyBackdrop이 단독으로 정한다:
-        // 텍스트 모드 ON이면 뒷배경색, OFF면 페이지 색(기존 동작). 페이지 전환 시에도 일관되게 유지.
+        // 비주얼 노벨 모드 ON이면 뒷배경색, OFF면 페이지 색(기존 동작). 페이지 전환 시에도 일관되게 유지.
         ApplyBackdrop();
     }
 
@@ -853,7 +900,9 @@ public partial class MainWindow : Window
             // 이미지가 실행 파일 폴더(또는 하위)면 상대 경로로, 아니면 절대 경로로 저장한다.
             // → 실행 파일·자동저장을 이미지와 함께 옮겨도 다음 실행 때 그대로 열린다.
             Pages = CaptureProjectPages(null),
-            FlowText = _flow.Clone()
+            FlowText = _flow.Clone(),
+            VnTemplates = _vnTemplates.Select(t => CopyPageForStorage(t, null)).ToList(),
+            VnEditingIndex = _editingTemplate != null ? _vnTemplates.IndexOf(_editingTemplate) : -1
         };
         return JsonSerializer.Serialize(project);
     }
@@ -903,9 +952,31 @@ public partial class MainWindow : Window
         }
 
         ComicTitleTextBox.Text = project.Title;
-        ReplacePages(project.Pages);
+        ReplacePages(project.Pages); // _editingTemplate = null로 초기화됨.
+        // VN 템플릿 복원(자동저장·실행취소 JSON 모두 VnTemplates를 포함하므로 그대로 교체).
+        _vnTemplates.Clear();
+        foreach (var t in project.VnTemplates)
+        {
+            _vnTemplates.Add(t);
+        }
+
         _currentPageIndex = Math.Clamp(project.CurrentPageIndex, 0, _pages.Count - 1);
-        LoadPage(_pages[_currentPageIndex]);
+
+        // 편집 대상 복원: 스냅샷이 템플릿 편집 중이었다면 그 템플릿을 캔버스로 연다.
+        if (project.VnEditingIndex >= 0 && project.VnEditingIndex < _vnTemplates.Count)
+        {
+            _editingTemplate = _vnTemplates[project.VnEditingIndex];
+            LoadPage(_editingTemplate);
+            _isSwitchingEditTarget = true;
+            VnTemplateListBox.SelectedIndex = project.VnEditingIndex;
+            PageListBox.SelectedIndex = -1;
+            _isSwitchingEditTarget = false;
+        }
+        else
+        {
+            LoadPage(_pages[_currentPageIndex]);
+        }
+
         ApplyFlowText(project.FlowText); // 본문 텍스트·서식 복원(실행취소/자동저장 포함).
         UpdatePageList();
     }
@@ -933,7 +1004,9 @@ public partial class MainWindow : Window
             Title = ComicTitleTextBox.Text.Trim(),
             CurrentIndex = _currentPageIndex,
             PageJsons = new List<string>(_pages.Count),
-            FlowJson = JsonSerializer.Serialize(_flow)
+            FlowJson = JsonSerializer.Serialize(_flow),
+            VnTemplatesJson = JsonSerializer.Serialize(_vnTemplates.Select(t => CopyPageForStorage(t, null)).ToList()),
+            VnEditingIndex = _editingTemplate != null ? _vnTemplates.IndexOf(_editingTemplate) : -1
         };
 
         var full = forceFull || _baseline == null || _historyStructuralPending
@@ -960,12 +1033,14 @@ public partial class MainWindow : Window
 
     // 스냅샷(페이지별 JSON)을 RestoreSnapshot이 읽는 전체 프로젝트 JSON으로 조립한다.
     // 페이지 JSON은 이미 만들어져 있으므로 문자열 연결만으로 끝난다(재직렬화 없음).
-    private static string AssembleFullJson(HistorySnapshot snapshot)
+    private string AssembleFullJson(HistorySnapshot snapshot)
     {
         var pages = string.Join(",", snapshot.PageJsons);
         var title = JsonSerializer.Serialize(snapshot.Title); // 따옴표·이스케이프 포함
         var flow = string.IsNullOrEmpty(snapshot.FlowJson) ? "{}" : snapshot.FlowJson;
-        return $"{{\"Title\":{title},\"CurrentPageIndex\":{snapshot.CurrentIndex},\"Pages\":[{pages}],\"FlowText\":{flow}}}";
+        // 스냅샷 시점의 템플릿·편집 대상까지 포함해야 실행취소/다시실행이 템플릿 편집도 되돌린다.
+        var templates = string.IsNullOrEmpty(snapshot.VnTemplatesJson) ? "[]" : snapshot.VnTemplatesJson;
+        return $"{{\"Title\":{title},\"CurrentPageIndex\":{snapshot.CurrentIndex},\"Pages\":[{pages}],\"FlowText\":{flow},\"VnTemplates\":{templates},\"VnEditingIndex\":{snapshot.VnEditingIndex}}}";
     }
 
     // 변화 감지용 경량 서명. 편집은 현재 페이지에서만 일어나므로, 전체가 아니라
@@ -978,7 +1053,9 @@ public partial class MainWindow : Window
         var current = _currentPageIndex >= 0 && _currentPageIndex < _pages.Count
             ? JsonSerializer.Serialize(_pages[_currentPageIndex])
             : string.Empty;
-        return $"{ComicTitleTextBox.Text}|{_currentPageIndex}|{_pages.Count}|{names}|{current}|{JsonSerializer.Serialize(_flow)}";
+        // VN 템플릿 편집·추가·삭제·전환도 변화로 잡아 실행취소 경계를 만든다(템플릿은 보통 적어 비용 작음).
+        var vn = $"{(_editingTemplate != null ? _vnTemplates.IndexOf(_editingTemplate) : -1)}|{JsonSerializer.Serialize(_vnTemplates)}";
+        return $"{ComicTitleTextBox.Text}|{_currentPageIndex}|{_pages.Count}|{names}|{current}|{JsonSerializer.Serialize(_flow)}|{vn}";
     }
 
     // 마지막 기준선과 달라졌으면 변경분을 undo 스택에 쌓는다.

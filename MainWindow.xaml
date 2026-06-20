@@ -70,10 +70,10 @@
                              TextChanged="ComicTitleTextBox_TextChanged"
                              Margin="0,0,0,12" />
 
-                    <!-- 텍스트 모드 토글은 인스펙터에 노출하지 않는다(메뉴 '새로 만들기(텍스트 템플릿)'·프로젝트 불러오기로 결정).
+                    <!-- 비주얼 노벨 모드 토글은 인스펙터에 노출하지 않는다(단축키 Ctrl+T로 켜고 끔).
                          컨트롤은 섹션 표시/숨김 로직을 위해 그대로 두되 화면에는 보이지 않게 Collapsed. -->
                     <CheckBox x:Name="FlowTextModeCheckBox"
-                              Content="텍스트 모드 (여러 페이지에 본문 흐름)"
+                              Content="비주얼 노벨 모드 (여러 페이지에 본문 흐름)"
                               Visibility="Collapsed"
                               Margin="0,0,0,12"
                               Checked="FlowTextModeCheckBox_Changed"
@@ -134,6 +134,31 @@
                     </StackPanel>
                     </Border>
 
+                    <Border x:Name="VnSectionBorder" Style="{StaticResource InspectorSection}" Visibility="Collapsed">
+                    <StackPanel>
+                    <TextBlock Text="비주얼 노벨 생성" Style="{StaticResource SectionHeader}" />
+                    <TextBlock Text="스크립트(한 줄 = 한 페이지). '이름: 대사' 형식, 이름 없는 줄은 서술로 처리됩니다."
+                               TextWrapping="Wrap" FontSize="11" Foreground="#8A8479" Margin="0,0,0,6" />
+                    <TextBox x:Name="VnScriptBox"
+                             AcceptsReturn="True" AcceptsTab="True" TextWrapping="Wrap"
+                             VerticalScrollBarVisibility="Auto" Height="120"
+                             Padding="6,4" Margin="0,0,0,8" />
+                    <TextBlock Text="템플릿 페이지 (생성 시 복제할 페이지)" Foreground="#55514A" Margin="0,0,0,4" />
+                    <ListBox x:Name="VnTemplateListBox"
+                             MinHeight="56" MaxHeight="120"
+                             DisplayMemberPath="Name"
+                             SelectionChanged="VnTemplateListBox_SelectionChanged"
+                             Margin="0,0,0,6" />
+                    <UniformGrid Rows="1" Columns="2" Margin="0,0,0,8">
+                        <Button Content="템플릿 복제" Click="VnAddTemplate_Click" Margin="0,0,4,0"
+                                ToolTip="템플릿을 선택 중이면 그 템플릿을, 아니면 현재 일반 페이지를 복제해 템플릿 목록에 추가합니다." />
+                        <Button Content="템플릿 삭제" Click="VnDeleteTemplate_Click" Margin="0" />
+                    </UniformGrid>
+                    <Button Content="생성" Click="VnGenerate_Click" Padding="8,5"
+                            ToolTip="스크립트 각 줄마다 선택한 템플릿을 복제하고 '이름'/'서술' 말풍선을 줄 내용으로 교체해 페이지를 만듭니다." />
+                    </StackPanel>
+                    </Border>
+
                     <Border x:Name="PageSectionBorder"
                             Style="{StaticResource InspectorSection}"
                             IsKeyboardFocusWithinChanged="PageSection_FocusChanged">
@@ -163,7 +188,8 @@
                                         </StackPanel.Style>
                                         <TextBlock Text="{Binding (ItemsControl.AlternationIndex), RelativeSource={RelativeSource AncestorType=ListBoxItem}, Converter={StaticResource AddOneConverter}}" />
                                         <TextBlock Text=". " />
-                                        <TextBlock Text="{Binding Name}" />
+                                        <!-- 비주얼 노벨 모드면 말풍선 텍스트 요약, 아니면 페이지 이름(DisplayLabel) -->
+                                        <TextBlock Text="{Binding DisplayLabel}" TextTrimming="CharacterEllipsis" />
                                     </StackPanel>
                                     <!-- 편집: 더블클릭/F2 시 표시되는 입력칸(기본 숨김은 Style로 — 로컬 값은 트리거를 덮어쓰므로). -->
                                     <TextBox Text="{Binding Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
@@ -186,9 +212,12 @@
                             </DataTemplate>
                         </ListBox.ItemTemplate>
                     </ListBox>
-                    <UniformGrid Rows="1" Columns="4" Margin="0,0,0,18">
+                    <UniformGrid Rows="1" Columns="5" Margin="0,0,0,18">
                         <Button Content="추가"
                                 Click="AddPage_Click"
+                                Margin="0,0,4,0" />
+                        <Button Content="복제"
+                                Click="DuplicatePage_Click"
                                 Margin="0,0,4,0" />
                         <Button Content="삭제"
                                 Click="DeletePage_Click"

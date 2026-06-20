@@ -9,12 +9,16 @@ public sealed class ComicProjectData
     public List<ComicPageData> Pages { get; set; } = new();
     // 프로젝트 전체에 걸쳐 페이지별로 자동 분할(노벨 뷰어) 표시되는 본문 텍스트.
     public FlowTextData FlowText { get; set; } = new();
+    // 비주얼 노벨 생성용 템플릿 페이지 목록(일반 페이지와 별개). 스크립트 각 줄을 이 템플릿에 복제·치환해 페이지를 만든다.
+    public List<ComicPageData> VnTemplates { get; set; } = new();
+    // 자동저장/실행취소 시 편집 중이던 템플릿 인덱스(-1이면 일반 페이지 편집). 복원 시 편집 대상을 되살린다.
+    public int VnEditingIndex { get; set; } = -1;
 }
 
 // 여러 페이지에 흘려 보여줄 본문 텍스트와 서식. 분할은 페이지 크기·이 서식으로 계산된다.
 public sealed class FlowTextData
 {
-    // 텍스트 모드 ON/OFF. OFF면 본문을 페이지에 표시하지 않고 인스펙터 텍스트 섹션도 숨긴다.
+    // 비주얼 노벨 모드 ON/OFF. OFF면 본문을 페이지에 표시하지 않고 인스펙터 텍스트 섹션도 숨긴다.
     public bool Enabled { get; set; }
     public string Text { get; set; } = string.Empty;
     public string FontFamily { get; set; } = "Malgun Gothic"; // 빈 값이면 기본 글꼴. 기본은 말풍선과 동일.
@@ -60,7 +64,40 @@ public sealed class ComicPageData : System.ComponentModel.INotifyPropertyChanged
     public string Name
     {
         get => _name;
-        set { if (_name != value) { _name = value; OnChanged(nameof(Name)); } }
+        set { if (_name != value) { _name = value; OnChanged(nameof(Name)); OnChanged(nameof(DisplayLabel)); } }
+    }
+
+    // 비주얼 노벨 모드면 목록에 페이지 이름 대신 말풍선 텍스트 요약을 보여 준다(UI 전용, 저장 안 함).
+    private bool _visualNovelMode;
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool VisualNovelMode
+    {
+        get => _visualNovelMode;
+        set { if (_visualNovelMode != value) { _visualNovelMode = value; OnChanged(nameof(DisplayLabel)); } }
+    }
+
+    // 페이지 목록 표시 라벨. 비주얼 노벨 모드면 말풍선 텍스트(순서대로 ' / '), 아니면 페이지 이름.
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string DisplayLabel => _visualNovelMode ? BubbleSummary() : Name;
+
+    // 비주얼 노벨 모드에서 현재 페이지 말풍선이 바뀌면 요약을 다시 계산하도록 알린다.
+    public void RefreshDisplayLabel() => OnChanged(nameof(DisplayLabel));
+
+    private string BubbleSummary()
+    {
+        var texts = new List<string>();
+        foreach (var panel in Panels)
+        {
+            foreach (var bubble in panel.Bubbles)
+            {
+                var t = (bubble.Text ?? string.Empty).Replace("\r", " ").Replace("\n", " ").Trim();
+                if (t.Length > 0)
+                {
+                    texts.Add(t);
+                }
+            }
+        }
+        return texts.Count > 0 ? string.Join(": ", texts) : string.Empty;
     }
 
     // 리스트에서 인라인 이름 편집 중인지(저장 안 함, UI 전용).

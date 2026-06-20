@@ -77,19 +77,24 @@ public partial class MainWindow : Window
 
     private void SaveCurrentPageState()
     {
-        if (_pages.Count == 0 || _currentPageIndex < 0 || _currentPageIndex >= _pages.Count)
+        // 편집 대상: VN 템플릿을 편집 중이면 그 템플릿, 아니면 현재 일반 페이지.
+        var target = _editingTemplate;
+        if (target == null)
         {
-            return;
+            if (_pages.Count == 0 || _currentPageIndex < 0 || _currentPageIndex >= _pages.Count)
+            {
+                return;
+            }
+            target = _pages[_currentPageIndex];
         }
 
         // 같은 객체를 유지한 채 내용만 갱신한다. 객체를 교체하면 페이지 리스트(바인딩)가
         // 옛 인스턴스를 보게 되어 인라인 이름 편집(IsEditing) 등이 동작하지 않는다.
-        var page = _pages[_currentPageIndex];
-        var captured = CaptureCurrentPage(page.Name);
-        page.PageWidth = captured.PageWidth;
-        page.PageHeight = captured.PageHeight;
-        page.BackgroundColor = captured.BackgroundColor;
-        page.Panels = captured.Panels;
+        var captured = CaptureCurrentPage(target.Name);
+        target.PageWidth = captured.PageWidth;
+        target.PageHeight = captured.PageHeight;
+        target.BackgroundColor = captured.BackgroundColor;
+        target.Panels = captured.Panels;
     }
 
     private ComicPageData CaptureCurrentPage(string name)
@@ -520,6 +525,7 @@ public partial class MainWindow : Window
         foreach (var page in _pages)
         {
             page.IsEditing = false; // 목록 갱신 시 인라인 편집 모드 해제(객체 bool만, 컨테이너 재생성 아님).
+            page.VisualNovelMode = _flow.Enabled; // 모드에 따라 목록 라벨(이름↔말풍선 요약) 전환.
         }
 
         PageListBox.SelectedIndex = _currentPageIndex;
@@ -531,6 +537,7 @@ public partial class MainWindow : Window
     // Clear(Reset) 후 한 건씩 추가 — 전체 교체라 증분 이점은 없지만 드물게만 일어난다.
     private void ReplacePages(IEnumerable<ComicPageData> pages)
     {
+        _editingTemplate = null; // 페이지 전체 교체 시 템플릿 편집 모드 해제.
         _pages.Clear();
         foreach (var page in pages)
         {

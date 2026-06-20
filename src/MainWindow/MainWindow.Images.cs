@@ -763,6 +763,7 @@ public partial class MainWindow : Window
             ClearSelection(announce: false);
         }
 
+        RefreshCurrentPageLabel(); // 비주얼 노벨 모드 페이지 목록 요약 갱신.
         UpdateStatus("말풍선을 삭제했습니다.");
         return true;
     }
@@ -825,6 +826,7 @@ public partial class MainWindow : Window
         UpdateBubbleOrder(_selectedPanel);
         UpdateBubbleList(_selectedPanel);
         BubbleListBox.SelectedItem = _selectedBubble;
+        RefreshCurrentPageLabel(); // 비주얼 노벨 모드 페이지 목록 요약(말풍선 순서) 갱신.
         UpdateStatus("말풍선 순서를 변경했습니다.");
     }
 
@@ -849,6 +851,7 @@ public partial class MainWindow : Window
         UpdatePanelOrder();
         UpdatePanelList();
         PanelListBox.SelectedItem = _selectedPanel;
+        RefreshCurrentPageLabel(); // 칸 순서가 바뀌면 말풍선 요약 순서도 바뀌므로 페이지 목록 갱신.
         UpdateStatus("칸 순서를 변경했습니다.");
     }
 
