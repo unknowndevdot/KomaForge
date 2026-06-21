@@ -67,6 +67,16 @@ public sealed class ComicPageData : System.ComponentModel.INotifyPropertyChanged
         set { if (_name != value) { _name = value; OnChanged(nameof(Name)); OnChanged(nameof(DisplayLabel)); } }
     }
 
+    // 목록에 표시할 1-based 순번. UpdatePageList에서 위치에 맞춰 갱신한다(AlternationIndex는 가상화/재활용 시
+    // 어긋나므로 쓰지 않는다). UI 전용, 저장 안 함.
+    private int _displayIndex;
+    [System.Text.Json.Serialization.JsonIgnore]
+    public int DisplayIndex
+    {
+        get => _displayIndex;
+        set { if (_displayIndex != value) { _displayIndex = value; OnChanged(nameof(DisplayIndex)); } }
+    }
+
     // 비주얼 노벨 모드면 목록에 페이지 이름 대신 말풍선 텍스트 요약을 보여 준다(UI 전용, 저장 안 함).
     private bool _visualNovelMode;
     [System.Text.Json.Serialization.JsonIgnore]
@@ -153,6 +163,10 @@ public sealed class PanelImageData
     public double ScaleY { get; set; }
     public double TranslateX { get; set; }
     public double TranslateY { get; set; }
+    // 기준 콘텐츠 박스 크기(= 이미지를 추가한 시점의 칸 폭/높이). Scale·Translate가 이 박스를 기준으로 계산되므로
+    // 반드시 함께 저장해야 한다. 0/미지정(구버전)이면 복원 시 현재 칸 크기로 폴백한다.
+    public double BaseWidth { get; set; }
+    public double BaseHeight { get; set; }
     public bool IsCropped { get; set; } = true;
     public bool IsLocked { get; set; }
     public double PivotX { get; set; }

@@ -164,7 +164,6 @@ public partial class MainWindow : Window
         RefreshShortcutMenuText(); // 메뉴의 단축키 표기를 현재 설정으로 맞춘다
         InitColorCombos(); // 팔레트 + 최근색 + '직접 지정…' 으로 색 콤보 구성(LoadWindowSettings 이후라 최근색 반영).
         InitBubbleFontCombo(); // 시스템 글꼴 목록으로 말풍선 글꼴 콤보 구성.
-        InitFlowFontCombo();   // 시스템 글꼴 목록으로 본문 텍스트 글꼴 콤보 구성.
         VnTemplateListBox.ItemsSource = _vnTemplates; // 비주얼 노벨 템플릿 목록 바인딩.
         _flowReady = true;     // 모든 컨트롤이 만들어졌으므로 본문 텍스트 핸들러를 활성화.
         Closing += (_, _) =>
@@ -659,7 +658,6 @@ public partial class MainWindow : Window
     {
         var newW = Math.Clamp(width, 100, 5000);
         var newH = Math.Clamp(height, 100, 5000);
-        var sizeChanged = newW != _pageWidth || newH != _pageHeight;
         _pageWidth = newW;
         _pageHeight = newH;
 
@@ -669,8 +667,6 @@ public partial class MainWindow : Window
         PanelCanvas.Height = _pageHeight;
         PageOverlay.Width = _pageWidth;
         PageOverlay.Height = _pageHeight;
-        FlowTextLayer.Width = _pageWidth;
-        FlowTextLayer.Height = _pageHeight;
 
         if (updateTextBoxes)
         {
@@ -680,11 +676,6 @@ public partial class MainWindow : Window
             _isLoadingInspector = false;
         }
 
-        // 페이지 크기가 바뀐 경우에만 본문 분할을 다시 계산한다(페이지 전환 시 불필요한 재분할 회피).
-        if (sizeChanged)
-        {
-            RebuildFlowDocument();
-        }
         UpdatePageFit();
     }
 
@@ -710,6 +701,13 @@ public partial class MainWindow : Window
         _updatingFitMenu = false;
 
         UpdatePageFit();
+
+        // 보기 설정은 토글 즉시 저장한다(강제 종료·크래시로 닫혀도 유실되지 않도록).
+        // 단, 불러오기 도중 메뉴를 세팅할 때는 저장하지 않는다(절반만 로드된 상태 저장 방지).
+        if (!_loadingWindowSettings)
+        {
+            SaveWindowSettings();
+        }
     }
 
     private void PageBackgroundColorComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -726,14 +724,15 @@ public partial class MainWindow : Window
     // 페이지 배경을 선택한 색으로 적용한다(내보내기 결과 배경에도 반영됨).
     private void ApplyPageBackground()
     {
+        var brush = new SolidColorBrush(CurrentPageBackgroundColor());
         if (PageSurface != null)
         {
-            PageSurface.Background = new SolidColorBrush(CurrentPageBackgroundColor());
+            PageSurface.Background = brush;
         }
-
-        // PageFrame(페이지 뒤 레이어)은 ApplyBackdrop이 단독으로 정한다:
-        // 비주얼 노벨 모드 ON이면 뒷배경색, OFF면 페이지 색(기존 동작). 페이지 전환 시에도 일관되게 유지.
-        ApplyBackdrop();
+        if (PageFrame != null)
+        {
+            PageFrame.Background = brush; // 페이지 뒤 레이어도 페이지 색으로(1px 테두리 오프셋 메움).
+        }
     }
 
     private void ToggleInspector_Click(object sender, RoutedEventArgs e)
@@ -765,6 +764,15 @@ public partial class MainWindow : Window
 
     private void PageScrollViewer_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
+        // 선택된 이미지가 칸 밖으로 벗어난 경우: 그 벗어난 부분(칸 프레임 밖)을 눌러도 드래그로 이동할 수 있게 한다.
+        // (칸 프레임 밖이라 프레임의 다운 핸들러가 닿지 않으므로 여기서 가로채 처리한다.)
+        if (ShouldBeginOverflowImageDrag(e))
+        {
+            BeginOverflowImageDrag(e);
+            e.Handled = true;
+            return;
+        }
+
         // 페이지(PageSurface) 밖 — 스크롤뷰어 여백 — 을 클릭하면 선택 해제.
         if (!IsInspectorOpen()) return; // 뷰어 모드에서는 어차피 선택이 없다.
         var node = e.OriginalSource as DependencyObject;
@@ -786,6 +794,13 @@ public partial class MainWindow : Window
             return;
         }
 
+        // 이미지가 선택돼 있으면 커서 위치와 무관하게(이미지 위에 올릴 필요 없이) 휠로 이미지 크기를 조절한다.
+        if (_selectionKind == SelectionKind.Image && _selectedImage != null)
+        {
+            ZoomImage(_selectedImage, e);
+            return;
+        }
+
         // 편집 모드라도 커서가 페이지 바깥(여백)에 있으면 휠로 페이지를 넘긴다.
         if (PageSurface != null && !IsMouseOverElement(PageSurface, e))
         {
@@ -802,14 +817,6 @@ public partial class MainWindow : Window
             IsMouseOverElement(_selectedBubble.Container, e))
         {
             ZoomBubble(_selectedBubble, e);
-            return;
-        }
-
-        // 선택된 이미지가 속한 칸 영역 위에서 휠 → 이미지 크기.
-        if (_selectionKind == SelectionKind.Image && _selectedImage != null &&
-            IsMouseOverElement(_selectedImage.OwnerPanel.Frame, e))
-        {
-            ZoomImage(_selectedImage, e);
             return;
         }
 
@@ -881,9 +888,49 @@ public partial class MainWindow : Window
     // 터널링 단계에서 인스펙터 ScrollViewer를 직접 스크롤한다(윈도우 휠 설정 반영).
     private void InspectorScrollViewer_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
     {
+        // 커서 아래에 자체 스크롤 가능한 내부 스크롤뷰어(리스트/여러 줄 텍스트박스)가 있고 그 방향으로 더
+        // 스크롤할 수 있으면, 그 컨트롤을 '한 번에 최대 한 화면'으로 제한해 직접 스크롤한다(휠이 너무 많이 넘어가지 않게).
+        var inner = FindScrollableInner(e.OriginalSource as DependencyObject, e.Delta);
+        if (inner != null)
+        {
+            ScrollViewerByNotch(inner, e.Delta);
+            e.Handled = true;
+            return;
+        }
+
         InspectorScrollViewer.ScrollToVerticalOffset(
             InspectorScrollViewer.VerticalOffset - WheelScrollPixels(InspectorScrollViewer, e.Delta));
         e.Handled = true;
+    }
+
+    // OriginalSource에서 InspectorScrollViewer까지 거슬러 올라가며, 휠 방향으로 더 스크롤 가능한
+    // 내부 스크롤뷰어(리스트·텍스트박스의 내부 ScrollViewer)를 찾는다.
+    private ScrollViewer? FindScrollableInner(DependencyObject? src, int delta)
+    {
+        while (src != null && !ReferenceEquals(src, InspectorScrollViewer))
+        {
+            if (src is ScrollViewer sv && !ReferenceEquals(sv, InspectorScrollViewer)
+                && sv.ScrollableHeight > 0.5
+                && (delta > 0 ? sv.VerticalOffset > 0.5 : sv.VerticalOffset < sv.ScrollableHeight - 0.5))
+            {
+                return sv;
+            }
+            src = src is Visual or System.Windows.Media.Media3D.Visual3D ? VisualTreeHelper.GetParent(src) : null;
+        }
+        return null;
+    }
+
+    // 휠 한 칸당 스크롤량을 '한 화면(보이는 만큼)' 이하로 제한해 스크롤한다.
+    private static void ScrollViewerByNotch(ScrollViewer sv, int delta)
+    {
+        var notches = delta / 120.0;
+        var lines = SystemParameters.WheelScrollLines; // -1이면 '한 번에 한 화면'.
+        // 아이템 단위(CanContentScroll)면 ViewportHeight=아이템 수, 픽셀 단위면 줄당 약 16px.
+        var perNotch = lines < 0
+            ? sv.ViewportHeight
+            : (sv.CanContentScroll ? lines : lines * 16.0);
+        perNotch = System.Math.Min(perNotch, sv.ViewportHeight); // 한 번에 최대 한 화면.
+        sv.ScrollToVerticalOffset(sv.VerticalOffset - notches * perNotch);
     }
 
     private void Undo_Click(object sender, RoutedEventArgs e) => Undo();

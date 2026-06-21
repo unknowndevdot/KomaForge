@@ -17,6 +17,56 @@ public partial class MainWindow
         }
     }
 
+    // 비주얼 노벨 모드에 템플릿이 하나도 없으면 기본 템플릿('이름'·'서술' 말풍선)을 1개 만들어 둔다.
+    // VN 모드를 켜는 시점에만 호출한다(실행취소/자동저장 복원 경로에서는 호출하지 않아 지운 템플릿이 되살아나지 않게).
+    private void EnsureDefaultVnTemplate()
+    {
+        if (_vnTemplates.Count > 0)
+        {
+            return;
+        }
+        var json = LoadDefaultVnTemplateJson();
+        if (json == null)
+        {
+            return;
+        }
+        try
+        {
+            var template = JsonSerializer.Deserialize<ComicPageData>(json);
+            if (template == null)
+            {
+                return;
+            }
+            RegeneratePageIds(template); // 새 ID 부여(임베디드 원본과 공유 없음).
+            template.Name = "템플릿 1";
+            _vnTemplates.Add(template);
+            _historyDirty = true;
+        }
+        catch
+        {
+            // 기본 템플릿 리소스가 손상됐어도 모드 진입은 막지 않는다(빈 목록 유지).
+        }
+    }
+
+    // 임베디드 리소스에서 기본 템플릿 JSON을 읽는다(없으면 null).
+    private static string? LoadDefaultVnTemplateJson()
+    {
+        var asm = typeof(MainWindow).Assembly;
+        var name = asm.GetManifestResourceNames()
+            .FirstOrDefault(n => n.EndsWith("DefaultVnTemplate.json", System.StringComparison.Ordinal));
+        if (name == null)
+        {
+            return null;
+        }
+        using var stream = asm.GetManifestResourceStream(name);
+        if (stream == null)
+        {
+            return null;
+        }
+        using var reader = new System.IO.StreamReader(stream, System.Text.Encoding.UTF8);
+        return reader.ReadToEnd();
+    }
+
     // 템플릿 복제: 템플릿을 편집(선택) 중이면 그 템플릿을, 아니면 현재 일반 페이지를 복제해 템플릿 목록에 추가한다.
     private void VnAddTemplate_Click(object sender, RoutedEventArgs e)
     {

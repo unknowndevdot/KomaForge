@@ -79,61 +79,6 @@
                               Checked="FlowTextModeCheckBox_Changed"
                               Unchecked="FlowTextModeCheckBox_Changed" />
 
-                    <Border x:Name="FlowTextSectionBorder" Style="{StaticResource InspectorSection}" Visibility="Collapsed">
-                    <StackPanel>
-                    <TextBlock Text="텍스트 (여러 페이지에 흐름)" Style="{StaticResource SectionHeader}" />
-                    <TextBlock Text="구간을 선택한 뒤 글꼴·글자색·아웃라인색을 바꾸면 그 부분만 적용됩니다(선택이 없으면 전체)."
-                               TextWrapping="Wrap" FontSize="11" Foreground="#8A8479" Margin="0,0,0,6" />
-                    <TextBox x:Name="FlowTextBox"
-                             AcceptsReturn="True" AcceptsTab="True" TextWrapping="Wrap"
-                             VerticalScrollBarVisibility="Auto" Height="120"
-                             Padding="6,4" Margin="0,0,0,8"
-                             IsInactiveSelectionHighlightEnabled="True"
-                             TextChanged="FlowTextBox_TextChanged" />
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
-                        <TextBlock Text="글꼴" Width="64" VerticalAlignment="Center" Foreground="#55514A" />
-                        <ComboBox x:Name="FlowFontFamilyComboBox" Width="130" MaxDropDownHeight="320" SelectionChanged="FlowFontFamilyComboBox_SelectionChanged" />
-                    </StackPanel>
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
-                        <TextBlock Text="크기" Width="64" VerticalAlignment="Center" Foreground="#55514A" />
-                        <TextBox x:Name="FlowFontSizeBox" Width="60" Text="20" Padding="6,2" VerticalContentAlignment="Center" TextChanged="FlowStyleBox_Changed" />
-                        <TextBlock Text="줄간격" VerticalAlignment="Center" Margin="12,0,6,0" Foreground="#55514A" />
-                        <TextBox x:Name="FlowLineHeightBox" Width="48" Text="30" Padding="6,2" VerticalContentAlignment="Center" TextChanged="FlowStyleBox_Changed" ToolTip="0이면 자동" />
-                    </StackPanel>
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
-                        <TextBlock Text="정렬" Width="64" VerticalAlignment="Center" Foreground="#55514A" />
-                        <ComboBox x:Name="FlowAlignmentComboBox" Width="130" SelectionChanged="FlowAlignmentComboBox_SelectionChanged">
-                            <ComboBoxItem Content="왼쪽" Tag="Left" />
-                            <ComboBoxItem Content="가운데" Tag="Center" />
-                            <ComboBoxItem Content="오른쪽" Tag="Right" />
-                            <ComboBoxItem Content="양쪽" Tag="Justify" IsSelected="True" />
-                        </ComboBox>
-                    </StackPanel>
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
-                        <TextBlock Text="글자색" Width="64" VerticalAlignment="Center" Foreground="#55514A" />
-                        <ComboBox x:Name="FlowColorComboBox" Width="130" SelectionChanged="FlowColorComboBox_SelectionChanged" />
-                    </StackPanel>
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
-                        <TextBlock Text="아웃라인색" Width="64" VerticalAlignment="Center" Foreground="#55514A" />
-                        <ComboBox x:Name="FlowOutlineColorComboBox" Width="130" SelectionChanged="FlowOutlineColorComboBox_SelectionChanged" ToolTip="'없음'이면 외곽선 없음" />
-                    </StackPanel>
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
-                        <TextBlock Text="뒷배경색" Width="64" VerticalAlignment="Center" Foreground="#55514A" />
-                        <ComboBox x:Name="FlowBackdropColorComboBox" Width="130" SelectionChanged="FlowBackdropColorComboBox_SelectionChanged" ToolTip="페이지 뒤에 깔리는 색. 페이지 배경을 투명으로 하면 이 색이 보입니다. '없음'이면 투명." />
-                    </StackPanel>
-                    <TextBlock Text="여백 (좌·상·우·하)" Foreground="#55514A" Margin="0,0,0,4" />
-                    <UniformGrid Rows="1" Columns="4">
-                        <TextBox x:Name="FlowMarginLeftBox" Text="30" Padding="6,2" VerticalContentAlignment="Center" Margin="0,0,4,0" TextChanged="FlowStyleBox_Changed" />
-                        <TextBox x:Name="FlowMarginTopBox" Text="30" Padding="6,2" VerticalContentAlignment="Center" Margin="0,0,4,0" TextChanged="FlowStyleBox_Changed" />
-                        <TextBox x:Name="FlowMarginRightBox" Text="30" Padding="6,2" VerticalContentAlignment="Center" Margin="0,0,4,0" TextChanged="FlowStyleBox_Changed" />
-                        <TextBox x:Name="FlowMarginBottomBox" Text="30" Padding="6,2" VerticalContentAlignment="Center" Margin="0" TextChanged="FlowStyleBox_Changed" />
-                    </UniformGrid>
-                    <Button Content="텍스트 길이에 맞춰 페이지 생성 및 삭제" Margin="0,12,0,0" Padding="8,5"
-                            Click="FitPagesToFlowText_Click"
-                            ToolTip="본문이 모두 보이도록 페이지 수를 자동으로 맞춥니다(부족하면 추가, 남으면 삭제)." />
-                    </StackPanel>
-                    </Border>
-
                     <Border x:Name="VnSectionBorder" Style="{StaticResource InspectorSection}" Visibility="Collapsed">
                     <StackPanel>
                     <TextBlock Text="비주얼 노벨 생성" Style="{StaticResource SectionHeader}" />
@@ -154,7 +99,7 @@
                                 ToolTip="템플릿을 선택 중이면 그 템플릿을, 아니면 현재 일반 페이지를 복제해 템플릿 목록에 추가합니다." />
                         <Button Content="템플릿 삭제" Click="VnDeleteTemplate_Click" Margin="0" />
                     </UniformGrid>
-                    <Button Content="생성" Click="VnGenerate_Click" Padding="8,5"
+                    <Button Content="생성" Click="VnGenerate_Click" Padding="8,5" Margin="0"
                             ToolTip="스크립트 각 줄마다 선택한 템플릿을 복제하고 '이름'/'서술' 말풍선을 줄 내용으로 교체해 페이지를 만듭니다." />
                     </StackPanel>
                     </Border>
@@ -167,7 +112,6 @@
                     <ListBox x:Name="PageListBox"
                              MinHeight="86"
                              MaxHeight="150"
-                             AlternationCount="10000"
                              SelectionChanged="PageListBox_SelectionChanged"
                              MouseDoubleClick="PageListBox_MouseDoubleClick"
                              PreviewKeyDown="PageListBox_PreviewKeyDown"
@@ -186,7 +130,7 @@
                                                 </Style.Triggers>
                                             </Style>
                                         </StackPanel.Style>
-                                        <TextBlock Text="{Binding (ItemsControl.AlternationIndex), RelativeSource={RelativeSource AncestorType=ListBoxItem}, Converter={StaticResource AddOneConverter}}" />
+                                        <TextBlock Text="{Binding DisplayIndex}" />
                                         <TextBlock Text=". " />
                                         <!-- 비주얼 노벨 모드면 말풍선 텍스트 요약, 아니면 페이지 이름(DisplayLabel) -->
                                         <TextBlock Text="{Binding DisplayLabel}" TextTrimming="CharacterEllipsis" />
@@ -667,6 +611,8 @@
                              AcceptsReturn="True"
                              TextWrapping="Wrap"
                              MinHeight="74"
+                             MaxHeight="200"
+                             VerticalScrollBarVisibility="Auto"
                              Padding="8"
                              IsInactiveSelectionHighlightEnabled="True"
                              ToolTip="구간을 선택한 뒤 글자색·아웃라인색·글꼴을 바꾸면 그 부분만 적용됩니다(선택이 없으면 전체)."
@@ -948,12 +894,6 @@
                                 Width="832"
                                 Height="1216"
                                 ClipToBounds="True" />
-                        <!-- 여러 페이지에 흘려 보여줄 본문 텍스트(칸·이미지 위, 클릭은 통과). -->
-                        <Grid x:Name="FlowTextLayer"
-                              Width="832"
-                              Height="1216"
-                              ClipToBounds="True"
-                              IsHitTestVisible="False" />
                         <Canvas x:Name="PageOverlay"
                                 Width="832"
                                 Height="1216"

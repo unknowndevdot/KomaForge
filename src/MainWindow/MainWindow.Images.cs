@@ -523,6 +523,39 @@ public partial class MainWindow : Window
         image.Scale.ScaleY = scale;
     }
 
+    // 이미지가 칸에 맞춰진(Uniform) 콘텐츠 대비 원본 100%가 되는 배율. 알 수 없으면 0.
+    private static double NativeScaleOf(PanelImage image)
+    {
+        var contentW = image.Content.Width;
+        var contentH = image.Content.Height;
+
+        double nativeW = 0, nativeH = 0;
+        if (image.Image?.Source is BitmapSource bitmap)
+        {
+            nativeW = bitmap.PixelWidth;
+            nativeH = bitmap.PixelHeight;
+        }
+        else if (image.Media != null && image.Media.NaturalVideoWidth > 0)
+        {
+            nativeW = image.Media.NaturalVideoWidth;
+            nativeH = image.Media.NaturalVideoHeight;
+        }
+
+        if (nativeW <= 0 || nativeH <= 0 || contentW <= 0 || contentH <= 0)
+        {
+            return 0;
+        }
+        var uniform = Math.Min(contentW / nativeW, contentH / nativeH);
+        return uniform > 0 ? 1.0 / uniform : 0;
+    }
+
+    // 휠 확대 상한: 원본 픽셀의 4배(= 4 × 원본100%배율). 원본이 작은 이미지는 기존 상한(5.0) 유지.
+    private static double MaxImageZoomScale(PanelImage image)
+    {
+        var native = NativeScaleOf(image);
+        return native > 0 ? Math.Max(5.0, 4.0 * native) : 5.0;
+    }
+
     private static Image CreateImageControl(BitmapSource source, ComicPanel panel, Transform transform)
     {
         var image = new Image

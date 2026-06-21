@@ -125,6 +125,9 @@ public partial class MainWindow : Window
         ScaleY = image.Scale.ScaleY,
         TranslateX = image.Translate.X,
         TranslateY = image.Translate.Y,
+        // Scale·Translate가 기준으로 삼는 콘텐츠 박스 크기(= 추가 당시 칸 크기). 함께 저장해야 재로딩 시 위치/크기가 보존된다.
+        BaseWidth = image.Content.Width,
+        BaseHeight = image.Content.Height,
         IsCropped = image.IsCropped,
         IsLocked = image.IsLocked,
         PivotX = image.PivotX,
@@ -226,6 +229,12 @@ public partial class MainWindow : Window
             panelData.Images.Add(CaptureImageData(image));
         }
 
+        // 파일이 없어 못 만든 이미지의 원본 데이터를 다시 포함시킨다(저장이 이를 덮어써 잃지 않도록).
+        foreach (var unresolved in panel.UnresolvedImages)
+        {
+            panelData.Images.Add(unresolved);
+        }
+
         foreach (var bubble in panel.Bubbles)
         {
             panelData.Bubbles.Add(CaptureBubbleData(bubble));
@@ -288,6 +297,8 @@ public partial class MainWindow : Window
                     ScaleY = image.ScaleY,
                     TranslateX = image.TranslateX,
                     TranslateY = image.TranslateY,
+                    BaseWidth = image.BaseWidth,
+                    BaseHeight = image.BaseHeight,
                     IsCropped = image.IsCropped,
                     IsLocked = image.IsLocked,
                     PivotX = image.PivotX,
@@ -337,8 +348,13 @@ public partial class MainWindow : Window
         Dispatcher.BeginInvoke(new Action(CullOffscreenPanels), System.Windows.Threading.DispatcherPriority.Loaded);
         // 인접 페이지(다음·이전) 정지 이미지를 백그라운드로 미리 디코드해 캐시를 데운다(이전 예열은 취소).
         BeginPrefetchAdjacentPages();
-        // 본문 텍스트(노벨 뷰어): 이 페이지 인덱스에 해당하는 분량 표시.
-        UpdateFlowTextLayer();
+
+        // 파일이 없어 못 띄운 이미지가 있으면 알린다(데이터는 보관되어 저장 시 유지됨 — 파일 복구 후 다시 열면 되살아남).
+        var missing = _panels.Sum(p => p.UnresolvedImages.Count);
+        if (missing > 0)
+        {
+            UpdateStatus($"이미지 파일 {missing}개를 찾지 못해 표시하지 못했습니다(데이터는 보존됨 — 파일을 복구한 뒤 다시 열면 복원됩니다).");
+        }
     }
 
     // --- DTO로부터 런타임 오브젝트 생성(불러오기·붙여넣기 공용) ---
@@ -348,11 +364,19 @@ public partial class MainWindow : Window
         var imagePath = ResolveProjectPath(imageData.Path);
         if (!File.Exists(imagePath))
         {
+            // 파일이 없어도 데이터를 버리지 않고 보관한다(저장 시 다시 합쳐 영구 삭제 방지).
+            panel.UnresolvedImages.Add(imageData);
             return null;
         }
 
         var image = AddPanelImage(panel, imagePath);
         if (!string.IsNullOrEmpty(imageData.Id)) image.Id = imageData.Id; // 저장/실행취소 ID 유지(붙여넣기는 비어 있어 새 ID 유지).
+        // 기준 콘텐츠 박스 크기 복원: Scale·Translate가 이 박스를 기준으로 계산되므로 추가 당시 크기로 되돌려야
+        // 위치/크기가 보존된다. 저장값이 없거나(구버전) 유효하지 않으면 현재 칸 크기(AddPanelImage 기본값)를 유지한다.
+        if (IsValidBaseSize(imageData.BaseWidth) && IsValidBaseSize(imageData.BaseHeight))
+        {
+            ApplyImageBaseSize(image, imageData.BaseWidth, imageData.BaseHeight);
+        }
         image.Scale.ScaleX = imageData.Scale <= 0 ? 1 : imageData.Scale;
         // ScaleY 미지정(구버전/비율 유지)이면 Scale과 동일(균일).
         image.Scale.ScaleY = imageData.ScaleY <= 0
@@ -373,6 +397,24 @@ public partial class MainWindow : Window
         SetImageLocked(image, imageData.IsLocked);
         ApplyImageOutputTiming(image); // 저장된 출력 설정대로 라이브 재생 타이밍 적용.
         return image;
+    }
+
+    private static bool IsValidBaseSize(double v) => v > 0 && !double.IsNaN(v) && !double.IsInfinity(v);
+
+    // 이미지 리그(레이어 + 그 안의 콘텐츠·그라데이션·선택틴트·동영상 포스터)를 모두 같은 크기로 맞춘다.
+    // 모든 요소가 동일 크기 + 동일 변환 + 원점(0.5,0.5)을 공유해야 정렬이 맞으므로 함께 바꾼다.
+    private static void ApplyImageBaseSize(PanelImage image, double w, double h)
+    {
+        image.Layer.Width = w;
+        image.Layer.Height = h;
+        foreach (var child in image.Layer.Children)
+        {
+            if (child is FrameworkElement fe)
+            {
+                fe.Width = w;
+                fe.Height = h;
+            }
+        }
     }
 
     private SpeechBubble AddBubbleFromData(ComicPanel panel, SpeechBubbleData bubbleData)
@@ -522,10 +564,12 @@ public partial class MainWindow : Window
             PageListBox.ItemsSource = _pages;
         }
 
-        foreach (var page in _pages)
+        for (var i = 0; i < _pages.Count; i++)
         {
+            var page = _pages[i];
             page.IsEditing = false; // 목록 갱신 시 인라인 편집 모드 해제(객체 bool만, 컨테이너 재생성 아님).
             page.VisualNovelMode = _flow.Enabled; // 모드에 따라 목록 라벨(이름↔말풍선 요약) 전환.
+            page.DisplayIndex = i + 1; // 위치 기반 순번(가상화·스크롤과 무관하게 정확).
         }
 
         PageListBox.SelectedIndex = _currentPageIndex;

@@ -21,4 +21,8 @@
     <PackageReference Include="Magick.NET-Q8-x64" Version="14.14.0" />
     <PackageReference Include="SkiaSharp" Version="2.88.8" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- 비주얼 노벨 모드 진입 시 템플릿이 없으면 생성하는 기본 템플릿('이름'·'서술' 말풍선). -->
+    <EmbeddedResource Include="Resources\DefaultVnTemplate.json" />
+  </ItemGroup>
 </Project>

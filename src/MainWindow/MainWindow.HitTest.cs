@@ -353,8 +353,12 @@ public partial class MainWindow : Window
         StatusText.Text = message;
     }
 
+    // 불러오기 중에는 메뉴 IsChecked 세팅이 PageFitCheckBox_Changed를 통해 저장을 트리거하지 않도록 막는다.
+    private bool _loadingWindowSettings;
+
     private void LoadWindowSettings()
     {
+        _loadingWindowSettings = true;
         try
         {
             // 새 이름이 있으면 그것을, 없으면 구버전 파일(window-settings.json)을 불러온다.
@@ -415,6 +419,10 @@ public partial class MainWindow : Window
         catch
         {
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
+        }
+        finally
+        {
+            _loadingWindowSettings = false;
         }
     }
 

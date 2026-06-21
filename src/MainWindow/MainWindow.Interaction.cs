@@ -517,6 +517,38 @@ public partial class MainWindow : Window
         }
     }
 
+    // 선택된 이미지가 칸 밖으로 벗어난 경우, 칸 프레임 밖(=BeginPanelDrag가 닿지 않는 곳)에서 이미지 위를
+    // 눌렀을 때 호출해 이미지 드래그를 시작한다. 소유 칸 프레임에 마우스를 캡처해 기존 이동/끝 핸들러를 재사용한다.
+    private void BeginOverflowImageDrag(MouseButtonEventArgs e)
+    {
+        var image = _selectedImage;
+        if (image == null)
+        {
+            return;
+        }
+        var frame = image.OwnerPanel.Frame;
+        _pendingSelect = null;
+        _pendingCycle = null;
+        _pendingDownPos = e.GetPosition(PageOverlay);
+        _isDraggingPanelImage = true;
+        _imageDragStart = e.GetPosition(frame); // 이동 계산은 소유 칸 프레임 좌표 기준(프레임 밖 음수 좌표도 정상).
+        _imageDragOrigin = new Point(image.Translate.X, image.Translate.Y);
+        frame.Cursor = Cursors.Hand;
+        frame.CaptureMouse(); // 캡처 후엔 프레임의 PreviewMouseMove/Up이 칸 밖에서도 모두 받아 드래그가 이어진다.
+    }
+
+    // 선택된 이미지가 (칸 밖으로 벗어난 부분 포함) 커서 아래에 있고, 소유 칸 프레임 밖을 눌렀는지.
+    // 프레임 안 클릭은 BeginPanelDrag가 정상 처리하므로 그 경우는 false(가로채지 않음).
+    private bool ShouldBeginOverflowImageDrag(MouseButtonEventArgs e)
+    {
+        if (!IsInspectorOpen() || _selectionKind != SelectionKind.Image || _selectedImage == null)
+        {
+            return false;
+        }
+        var frame = _selectedImage.OwnerPanel.Frame;
+        return !IsMouseOverElement(frame, e) && IsMouseOverElement(_selectedImage.Content, e);
+    }
+
     // 클릭(이동 없음)으로 끝났으면 보류된 '한 단계 안쪽' 대상을 선택한다(드래그였으면 순환하지 않음).
     private void CommitPendingCycleIfClick(MouseButtonEventArgs e)
     {
@@ -836,9 +868,11 @@ public partial class MainWindow : Window
     private void ZoomImage(PanelImage image, MouseWheelEventArgs e)
     {
         var step = e.Delta > 0 ? 1.08 : 0.92;
+        // 상한은 원본 픽셀의 4배(큰 이미지는 원본 100%가 이미 높아 고정 5.0이면 더 못 키우므로).
+        var max = MaxImageZoomScale(image);
         // 가로/세로 배율에 각각 같은 비율을 곱해(자유 리사이즈로 달라진 종횡비는 유지) 중심 고정 확대/축소.
-        image.Scale.ScaleX = Math.Clamp(image.Scale.ScaleX * step, 0.3, 5.0);
-        image.Scale.ScaleY = Math.Clamp(image.Scale.ScaleY * step, 0.3, 5.0);
+        image.Scale.ScaleX = Math.Clamp(image.Scale.ScaleX * step, 0.3, max);
+        image.Scale.ScaleY = Math.Clamp(image.Scale.ScaleY * step, 0.3, max);
         PositionImageSelectionBox();
         e.Handled = true;
     }

@@ -148,6 +148,16 @@ public partial class MainWindow : Window
 
     private void ClearPanelImage_Click(object sender, RoutedEventArgs e)
     {
+        // 파일이 없는(미해결) 이미지가 선택돼 있으면 그 보관 데이터를 제거한다(칸 선택 여부와 무관).
+        if (ImageListBox.SelectedItem is UnresolvedImageItem missing)
+        {
+            missing.Panel.UnresolvedImages.Remove(missing.Data);
+            _historyDirty = true;
+            UpdateImageList(missing.Panel);
+            UpdateStatus("없는 이미지 항목을 삭제했습니다.");
+            return;
+        }
+
         if (_selectedPanel == null)
         {
             UpdateStatus("이미지를 제거할 칸을 먼저 선택하세요.");

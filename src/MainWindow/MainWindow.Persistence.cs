@@ -22,7 +22,7 @@ public partial class MainWindow : Window
     // 동영상 프레임 캡처로 디스패처를 펌프하는 동안엔 히스토리 타이머 등 콜백을 잠시 멈춘다(부분 상태 캡처 방지).
     private bool _pumpingMedia;
 
-    private enum ExportFormat { Png, Webp }
+    private enum ExportFormat { Png, Webp, Script }
 
     // 마지막 내보내기 설정(세션·세션 간 기억). _exportWebp=null이면 형식은 페이지 움직임 유무로 자동 선택.
     // (투명 배경은 별도 옵션 없이 '페이지 배경색'을 투명으로 두면 그대로 투명 출력된다.)
@@ -107,10 +107,19 @@ public partial class MainWindow : Window
 
         SaveCurrentPageState();
 
+        // 비주얼 노벨 모드의 '전체 페이지 내보내기'에서는 형식에 '스크립트(.txt)'를 추가로 제공한다.
+        var allowScript = !currentPageOnly && _flow.Enabled;
+
         // 길이·FPS는 각 이미지의 '출력' 설정대로 자동 적용된다(설정 창에는 형식·배수·품질만).
-        var settings = ShowExportDialog();
+        var settings = ShowExportDialog(allowScript);
         if (settings == null)
         {
+            return;
+        }
+
+        if (settings.Format == ExportFormat.Script)
+        {
+            ExportScriptTxt();
             return;
         }
 
@@ -249,6 +258,51 @@ public partial class MainWindow : Window
         {
             UpdateStatus($"{exported}개 페이지를 내보냈습니다: {folder}");
         }
+    }
+
+    // 모든 페이지의 말풍선 텍스트(페이지 목록에 보이는 요약)를 한 줄씩 .txt로 내보낸다.
+    private void ExportScriptTxt()
+    {
+        var save = new SaveFileDialog
+        {
+            Title = "스크립트 내보내기",
+            Filter = "텍스트 (*.txt)|*.txt",
+            FileName = $"{SanitizeFileName(string.IsNullOrWhiteSpace(ComicTitleTextBox.Text) ? "script" : ComicTitleTextBox.Text.Trim())}.txt"
+        };
+        if (save.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        try
+        {
+            // 페이지마다 말풍선 텍스트를 순서대로 ': '로 이어 한 줄로(페이지 목록 요약과 동일).
+            var lines = _pages.Select(PageScriptLine);
+            System.IO.File.WriteAllText(save.FileName, string.Join("\r\n", lines), new System.Text.UTF8Encoding(true));
+            UpdateStatus($"스크립트를 내보냈습니다: {save.FileName}");
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"스크립트를 내보내지 못했습니다.\n\n{ex.Message}", "오류", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    // 한 페이지의 말풍선 텍스트를 순서대로(칸→말풍선) ': '로 이어 한 줄로 만든다(빈 말풍선 제외).
+    private static string PageScriptLine(ComicPageData page)
+    {
+        var texts = new List<string>();
+        foreach (var panel in page.Panels)
+        {
+            foreach (var bubble in panel.Bubbles)
+            {
+                var t = (bubble.Text ?? string.Empty).Replace("\r", " ").Replace("\n", " ").Trim();
+                if (t.Length > 0)
+                {
+                    texts.Add(t);
+                }
+            }
+        }
+        return string.Join(": ", texts);
     }
 
     // 현재 페이지를 PNG 한 장으로 저장(동영상은 첫 프레임 스틸을 임시 합성).
@@ -622,7 +676,7 @@ public partial class MainWindow : Window
     // 통합 내보내기 설정 창. 형식(PNG/WebP)·배수, WebP면 무손실·품질을 받아 ExportSettings로 돌려준다.
     // 취소하면 null. 길이·FPS는 각 이미지의 '출력' 설정대로 자동 적용되므로 여기엔 없다.
     // 현재 페이지에 움직이는 요소가 있으면 WebP를 기본 선택한다.
-    private ExportSettings? ShowExportDialog()
+    private ExportSettings? ShowExportDialog(bool allowScript)
     {
         ExportSettings? result = null;
 
@@ -652,8 +706,16 @@ public partial class MainWindow : Window
         root.Children.Add(pngRadio);
         root.Children.Add(webpRadio);
 
+        // 비주얼 노벨 모드 전체 내보내기: 스크립트(.txt) 형식 추가.
+        var scriptRadio = new RadioButton { Content = "스크립트 (.txt — 모든 페이지 텍스트)", GroupName = "fmt", Foreground = dark, Margin = new Thickness(0, 2, 0, 0) };
+        if (allowScript)
+        {
+            root.Children.Add(scriptRadio);
+        }
+
         // 배수.
-        root.Children.Add(new TextBlock { Text = "배수", FontWeight = FontWeights.Bold, Foreground = dark, Margin = new Thickness(0, 12, 0, 6) });
+        var scaleHeader = new TextBlock { Text = "배수", FontWeight = FontWeights.Bold, Foreground = dark, Margin = new Thickness(0, 12, 0, 6) };
+        root.Children.Add(scaleHeader);
         var scaleLabel = new TextBlock { Foreground = dark, FontWeight = FontWeights.Bold, MinWidth = 52, TextAlignment = System.Windows.TextAlignment.Right, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0) };
         var scaleSlider = new Slider { Minimum = 1, Maximum = 4, Value = Math.Clamp(_exportScale, 1, 4), TickFrequency = 0.25, IsSnapToTickEnabled = true, VerticalAlignment = VerticalAlignment.Center };
         var scaleRow = new DockPanel();
@@ -684,13 +746,17 @@ public partial class MainWindow : Window
         void Refresh()
         {
             scaleLabel.Text = $"{scaleSlider.Value:0.##}×";
-            animPanel.Visibility = webpRadio.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+            var script = scriptRadio.IsChecked == true;
+            // 스크립트는 텍스트만 내보내므로 배수·무손실/품질을 숨긴다.
+            scaleHeader.Visibility = scaleRow.Visibility = script ? Visibility.Collapsed : Visibility.Visible;
+            animPanel.Visibility = (!script && webpRadio.IsChecked == true) ? Visibility.Visible : Visibility.Collapsed;
             qualityLabel.Opacity = losslessCheck.IsChecked == true ? 0.4 : 1.0;
             qualityBox.IsEnabled = losslessCheck.IsChecked != true;
         }
 
         pngRadio.Checked += (_, _) => Refresh();
         webpRadio.Checked += (_, _) => Refresh();
+        scriptRadio.Checked += (_, _) => Refresh();
         scaleSlider.ValueChanged += (_, _) => Refresh();
         losslessCheck.Checked += (_, _) => Refresh();
         losslessCheck.Unchecked += (_, _) => Refresh();
@@ -701,6 +767,13 @@ public partial class MainWindow : Window
         var okBtn = new Button { Content = "내보내기", MinWidth = 72, Margin = new Thickness(0, 0, 8, 0) };
         okBtn.Click += (_, _) =>
         {
+            if (scriptRadio.IsChecked == true)
+            {
+                result = new ExportSettings { Format = ExportFormat.Script };
+                dialog.DialogResult = true;
+                return;
+            }
+
             var webpSel = webpRadio.IsChecked == true;
             result = new ExportSettings
             {
@@ -749,17 +822,6 @@ public partial class MainWindow : Window
         var visual = new DrawingVisual();
         using (var context = visual.RenderOpen())
         {
-            // 비주얼 노벨 모드의 '뒷배경색'을 페이지보다 먼저(맨 뒤) 깐다. 페이지 배경이 불투명하면 그 위가 덮여 안 보이고,
-            // 페이지 배경이 투명이면 이 색이 그대로 보인다('없음'(알파 0)이면 투명 유지).
-            if (_flow.Enabled)
-            {
-                var backdrop = SafeColor(string.IsNullOrEmpty(_flow.BackdropColor) ? "#FFFFFF" : _flow.BackdropColor);
-                if (backdrop.A > 0)
-                {
-                    context.DrawRectangle(new SolidColorBrush(backdrop), null, pageRect);
-                }
-            }
-
             // 배경을 직접 그린다(페이지별 색). PageSurface는 PageFrame 테두리(1px)만큼 오프셋이 있어
             // VisualBrush로 쓰면 좌/상에 1px 투명 여백이 생기므로, 그리드 원점(0,0)에 있는 PanelCanvas를 렌더한다.
             // 배경색이 투명(알파 0)이면 칠해도 아무 효과가 없어 그 영역이 투명으로 남는다(= 투명 내보내기).
@@ -774,19 +836,6 @@ public partial class MainWindow : Window
                 Stretch = Stretch.Fill
             };
             context.DrawRectangle(brush, null, pageRect);
-
-            // 본문 텍스트(노벨 뷰어) — 칸·이미지 위에 얹힌다. 현재 페이지 분량만큼만 보이므로 그대로 렌더한다.
-            if (FlowTextLayer != null)
-            {
-                FlowTextLayer.UpdateLayout();
-                var flowBrush = new VisualBrush(FlowTextLayer)
-                {
-                    ViewboxUnits = BrushMappingMode.Absolute,
-                    Viewbox = pageRect,
-                    Stretch = Stretch.Fill
-                };
-                context.DrawRectangle(flowBrush, null, pageRect);
-            }
         }
 
         // 논리 페이지 좌표를 '실제 출력 버퍼 크기'로 확대 → 벡터·이미지가 더 높은 해상도로 재래스터화(슈퍼샘플링).

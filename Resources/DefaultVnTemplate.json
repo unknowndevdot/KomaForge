@@ -1,0 +1,141 @@
+{
+  "Name": "템플릿 1",
+  "PageWidth": 832,
+  "PageHeight": 832,
+  "BlackBackground": false,
+  "BackgroundColor": "#000000",
+  "Panels": [
+    {
+      "Number": 1,
+      "Id": "f09f4cb9bed4432d90c88da54fcbb472",
+      "Name": "",
+      "X": 0,
+      "Y": 0,
+      "Width": 832,
+      "Height": 832,
+      "IsLocked": false,
+      "CornerMode": false,
+      "BackgroundColor": "#000000",
+      "BorderColor": "#00FFFFFF",
+      "CornerOffsets": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "Images": [],
+      "Bubbles": [
+        {
+          "Id": "4926cc2b3585424fb5673788f8b97b14",
+          "Text": "이름",
+          "X": 24,
+          "Y": 539,
+          "Width": 170,
+          "Height": 56,
+          "FontSize": 20,
+          "FontFamily": "Malgun Gothic",
+          "TextAlignment": "Center",
+          "VerticalAlignment": "Center",
+          "Runs": [
+            {
+              "Text": "이름",
+              "FontFamily": null,
+              "Color": null,
+              "OutlineColor": null
+            }
+          ],
+          "LineHeight": 0,
+          "TextMarginLeft": 0,
+          "TextMarginTop": 0,
+          "TextMarginRight": 0,
+          "TextMarginBottom": 0,
+          "IsCropped": false,
+          "IsLocked": false,
+          "HasTextOutline": false,
+          "FillColor": "#FFFFFF",
+          "StrokeColor": "#00FFFFFF",
+          "BackgroundColor": "#C8000000",
+          "BorderColor": "#868E96",
+          "Shape": "RoundRect",
+          "ShapeCount": 9,
+          "ShapeStrength": 100,
+          "ShapeIrregularity": 50,
+          "ShapeWidthVariation": 0,
+          "CornerOffsets": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "WarpShape": false,
+          "WarpText": false,
+          "TailInward": false,
+          "PivotX": 0.5,
+          "PivotY": 0.5,
+          "Tails": []
+        },
+        {
+          "Id": "7fddbd42e843433aa9ce82759bf1a619",
+          "Text": "서술",
+          "X": 24,
+          "Y": 618.9370629370628,
+          "Width": 784,
+          "Height": 189.06293706293718,
+          "FontSize": 20,
+          "FontFamily": "Malgun Gothic",
+          "TextAlignment": "Left",
+          "VerticalAlignment": "Top",
+          "Runs": [
+            {
+              "Text": "서술",
+              "FontFamily": null,
+              "Color": null,
+              "OutlineColor": null
+            }
+          ],
+          "LineHeight": 0,
+          "TextMarginLeft": 32,
+          "TextMarginTop": 24,
+          "TextMarginRight": 32,
+          "TextMarginBottom": 24,
+          "IsCropped": false,
+          "IsLocked": false,
+          "HasTextOutline": false,
+          "FillColor": "#FFFFFF",
+          "StrokeColor": "#00FFFFFF",
+          "BackgroundColor": "#C8000000",
+          "BorderColor": "#868E96",
+          "Shape": "RoundRect",
+          "ShapeCount": 9,
+          "ShapeStrength": 100,
+          "ShapeIrregularity": 50,
+          "ShapeWidthVariation": 0,
+          "CornerOffsets": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "WarpShape": false,
+          "WarpText": false,
+          "TailInward": false,
+          "PivotX": 0.5,
+          "PivotY": 0.5,
+          "Tails": []
+        }
+      ]
+    }
+  ]
+}

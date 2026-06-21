@@ -75,6 +75,9 @@ public sealed class ComicPanel : System.ComponentModel.INotifyPropertyChanged
     public Thumb ResizeHandle { get; }
     public List<PanelImage> Images { get; } = new();
     public PanelImage? SelectedImage { get; set; }
+    // 파일이 없어 런타임으로 만들지 못한 이미지의 원본 데이터(로드 시 보관). 저장 시 다시 합쳐 영구 삭제를 막는다.
+    // 파일이 복구되면 다음 로드에서 정상 이미지로 되살아난다.
+    public List<PanelImageData> UnresolvedImages { get; } = new();
     public List<SpeechBubble> Bubbles { get; } = new();
     public bool IsLocked { get; set; }
 
@@ -191,6 +194,21 @@ public sealed class PanelImage
         var tag = Kind == MediaKind.Video ? "🎞 " : Kind == MediaKind.Animated ? "▶ " : "";
         return $"{(IsLocked ? "🔒 " : "")}{tag}{index}번 이미지 - {System.IO.Path.GetFileName(Path)}";
     }
+}
+
+// 파일이 없어 못 띄운 이미지를 이미지 리스트에 표시·삭제하기 위한 항목(원본 데이터·소유 칸을 함께 보관).
+public sealed class UnresolvedImageItem
+{
+    public ComicPanel Panel { get; }
+    public PanelImageData Data { get; }
+
+    public UnresolvedImageItem(ComicPanel panel, PanelImageData data)
+    {
+        Panel = panel;
+        Data = data;
+    }
+
+    public override string ToString() => $"⚠ (파일 없음) {System.IO.Path.GetFileName(Data.Path)}";
 }
 
 public sealed class SpeechBubble

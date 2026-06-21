@@ -632,6 +632,11 @@ public partial class MainWindow : Window
             {
                 ImageListBox.Items.Add(image);
             }
+            // 파일이 없어 못 띄운 이미지도 목록에 보여 준다(존재 사실을 알 수 있게 — 데이터는 보존됨). 선택해 삭제 가능.
+            foreach (var missing in panel.UnresolvedImages)
+            {
+                ImageListBox.Items.Add(new UnresolvedImageItem(panel, missing));
+            }
         }
 
         ImageListBox.SelectedItem = _selectedImage != null && _selectedImage.OwnerPanel == panel
