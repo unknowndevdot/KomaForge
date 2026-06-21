@@ -184,6 +184,7 @@ public partial class MainWindow : Window
         TryLoadAutosave();
         UpdatePageList();
         UpdateInspectorLabels();
+        UpdateWindowTitle(); // 시작 시 제목을 버전 포함으로 세팅(XAML 기본 제목 대체).
 
         // 히스토리 초기화: 현재 상태를 기준선으로 삼고, 변화 감지 타이머를 돌린다.
         ResetHistoryBaseline();
@@ -1369,8 +1370,14 @@ public partial class MainWindow : Window
         UpdateWindowTitle();
     }
 
-    // 앱 버전(창 제목 등에 표시).
-    private const string AppVersion = "v0.1.2";
+    // 앱 버전(창 제목 등에 표시). csproj의 <Version> 한 곳에서 런타임에 읽는다(하드코딩 중복 제거).
+    private static readonly string AppVersion = ReadAppVersion();
+
+    private static string ReadAppVersion()
+    {
+        var v = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
+        return v != null ? $"v{v.Major}.{v.Minor}.{v.Build}" : "v0.0.0";
+    }
 
     private void UpdateWindowTitle()
     {
