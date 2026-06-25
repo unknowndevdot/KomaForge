@@ -825,9 +825,16 @@ public partial class MainWindow : Window
         BubbleShapeCountSlider.Maximum = shape == BubbleShape.Flash ? 1000 : 100;
 
         SetShapeOptionVisible(BubbleShapeStrengthText, BubbleShapeStrengthSlider, hasStrength);
+        // 모양에 따라 라벨 이름이 달라지므로(속도선=회전, 그 외=강도) 모양 변경 즉시 라벨을 갱신한다.
+        if (BubbleShapeStrengthText != null)
+        {
+            BubbleShapeStrengthText.Text = $"{StrengthOptionName(shape)}: {BubbleShapeStrengthSlider.Value:0}";
+        }
         SetShapeOptionVisible(BubbleShapeCountText, BubbleShapeCountSlider, hasCountAndIrregularity);
         SetShapeOptionVisible(BubbleShapeIrregularityText, BubbleShapeIrregularitySlider, hasCountAndIrregularity);
         SetShapeOptionVisible(BubbleShapeWidthVarText, BubbleShapeWidthVarSlider, hasWidthVar);
+        // 글자 회전은 선효과(속도선·집중선)를 뺀 모든 말풍선에서 보여 준다.
+        SetShapeOptionVisible(BubbleTextRotationText, BubbleTextRotationSlider, !IsLineEffectShape(shape));
 
         // 꼬리는 본체가 있는 모양(원형/사각·구름폭발·플래시)에만 의미가 있다. 집중선·속도선·테두리 없음은 꼬리 섹션을 숨긴다.
         var hasTail = shape is BubbleShape.RoundRect or BubbleShape.CloudExplosion or BubbleShape.Flash;
@@ -862,6 +869,22 @@ public partial class MainWindow : Window
         }
 
         _selectedBubble.ShapeStrength = BubbleShapeStrengthSlider.Value;
+        UpdateBubbleGeometry(_selectedBubble);
+    }
+
+    private void BubbleTextRotationSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (BubbleTextRotationText != null)
+        {
+            BubbleTextRotationText.Text = $"텍스트 회전: {BubbleTextRotationSlider.Value:0}°";
+        }
+
+        if (_isLoadingInspector || _selectedBubble == null)
+        {
+            return;
+        }
+
+        _selectedBubble.TextRotation = BubbleTextRotationSlider.Value;
         UpdateBubbleGeometry(_selectedBubble);
     }
 

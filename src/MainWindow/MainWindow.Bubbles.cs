@@ -66,6 +66,17 @@ public partial class MainWindow : Window
         {
             tb.WarpOffsets = null;
         }
+
+        // 글자 회전('텍스트 회전' 값). 선효과(속도선·집중선)는 대사가 없으니 제외, 그 외 모든 말풍선은 글자 요소 중심 기준으로 돌린다.
+        if (!IsLineEffectShape(bubble.Shape) && Math.Abs(bubble.TextRotation) > 0.01)
+        {
+            tb.RenderTransformOrigin = new System.Windows.Point(0.5, 0.5);
+            tb.RenderTransform = new System.Windows.Media.RotateTransform(bubble.TextRotation);
+        }
+        else
+        {
+            tb.RenderTransform = null;
+        }
     }
 
     // 말풍선 안에 글자가 들어가도록, 설정 글자 크기(MaxFontSize)를 최대로 두고
@@ -629,6 +640,8 @@ public partial class MainWindow : Window
         bottom = Math.Clamp(bottom, 0, Math.Max(0, h - top - minRegion));
 
         tb.Margin = new Thickness(left, top, right, bottom);
+        ApplyBubbleAutoFit(_selectedBubble);   // 줄어든 텍스트 영역에 맞춰 폰트 재축소(넘침/잘림 방지).
+        ApplyBubbleTextWarp(_selectedBubble);  // 여백이 바뀌었으니 워프 매핑도 갱신.
         PositionTextRegionHandles();
     }
 

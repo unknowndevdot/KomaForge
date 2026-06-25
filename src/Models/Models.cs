@@ -272,6 +272,8 @@ public sealed class SpeechBubble
     public bool WarpShape { get; set; }
     // 모서리 조절을 안의 글자에 적용할지.
     public bool WarpText { get; set; }
+    // 글자 회전 각도(도, 0~360). 0이면 회전 없음. 선효과(속도선·집중선)를 제외한 모든 말풍선에 적용. 글자 요소 중심을 기준으로 돈다.
+    public double TextRotation { get; set; }
 
     public override string ToString()
     {
@@ -506,6 +508,11 @@ public sealed class OutlinedTextBlock : FrameworkElement
         var ft = CreateFormattedText(maxWidth);
         return new Size(ft.Width + pad.Left + pad.Right, ft.Height + pad.Top + pad.Bottom);
     }
+
+    // WPF 기본 동작: 콘텐츠가 레이아웃 슬롯(=텍스트 영역)보다 크면 자동으로 그 경계로 잘라낸다(layout clip).
+    // 말풍선 글자는 영역을 넘쳐도(작은 영역·워프 등) 잘리지 않게 이 자동 클립을 끈다.
+    // (칸 크롭은 panel.Overlay.Clip이 별도로 처리하므로 영향 없음.)
+    protected override Geometry? GetLayoutClip(Size layoutSlotSize) => null;
 
     protected override void OnRender(DrawingContext drawingContext)
     {

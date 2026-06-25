@@ -19,8 +19,22 @@ public partial class MainWindow : Window
     private static Geometry CreateRoundRectGeometry(double width, double height, double strength)
     {
         var t = Math.Clamp(strength, 0, 100) / 100.0;
-        var rx = width / 2.0 * (1.0 - t);
-        var ry = height / 2.0 * (1.0 - t);
+        // 강도에 따라 타원(0) → 캡슐(50) → 사각형(100)으로 블렌딩한다.
+        //  - 0~50: 타원 반경(너비/높이 각각)에서 '짧은 변 기준 균일 반경(캡슐)'으로 보간 → 점점 모서리가 일정해진다.
+        //  - 50~100: 캡슐(균일 반경)을 0으로 균일하게 줄여 사각형이 된다 → 모서리 곡선이 비율과 무관하게 일정.
+        var rCapsule = Math.Min(width, height) / 2.0;
+        double rx, ry;
+        if (t <= 0.5)
+        {
+            var b = t / 0.5;
+            rx = width / 2.0 + (rCapsule - width / 2.0) * b;
+            ry = height / 2.0 + (rCapsule - height / 2.0) * b;
+        }
+        else
+        {
+            var c = (t - 0.5) / 0.5;
+            rx = ry = rCapsule * (1.0 - c);
+        }
         var geometry = new RectangleGeometry(new Rect(0, 0, Math.Max(1, width), Math.Max(1, height)), rx, ry);
         geometry.Freeze();
         return geometry;

@@ -225,6 +225,8 @@ public sealed class SpeechBubbleData
     // 모서리 조절을 도형/글자에 적용할지(개별).
     public bool WarpShape { get; set; }
     public bool WarpText { get; set; }
+    // 테두리 없음 말풍선의 글자 회전 각도(도). 0/미지정이면 회전 없음.
+    public double TextRotation { get; set; }
     public bool TailInward { get; set; }
     public double PivotX { get; set; }
     public double PivotY { get; set; } = 1;

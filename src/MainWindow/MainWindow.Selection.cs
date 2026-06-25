@@ -200,6 +200,8 @@ public partial class MainWindow : Window
         BubbleShapeCountText.Text = $"돌기: {BubbleShapeCountSlider.Value:0}";
         BubbleShapeIrregularityText.Text = $"불규칙도(깎임): {BubbleShapeIrregularitySlider.Value:0}";
         BubbleShapeWidthVarText.Text = $"불규칙도(폭): {BubbleShapeWidthVarSlider.Value:0}";
+        BubbleTextRotationSlider.Value = Math.Clamp(bubble.TextRotation, BubbleTextRotationSlider.Minimum, BubbleTextRotationSlider.Maximum);
+        BubbleTextRotationText.Text = $"텍스트 회전: {BubbleTextRotationSlider.Value:0}°";
         UpdateBubbleShapeOptionVisibility(bubble.Shape);
         // '안으로 깎기'는 선택한 꼬리 개별 값이므로, 선택된 꼬리가 있으면 그 값으로(없으면 해제).
         BubbleTailInwardCheckBox.IsChecked = _selectedBubbleTail?.TailInward == true;

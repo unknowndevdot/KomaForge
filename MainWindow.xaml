@@ -717,6 +717,16 @@
                             ValueChanged="BubbleShapeStrengthSlider_ValueChanged"
                             Margin="0,0,0,10" />
 
+                    <TextBlock x:Name="BubbleTextRotationText"
+                               Foreground="#55514A"
+                               Margin="0,0,0,2" />
+                    <Slider x:Name="BubbleTextRotationSlider"
+                            Minimum="0"
+                            Maximum="360"
+                            Value="0"
+                            ValueChanged="BubbleTextRotationSlider_ValueChanged"
+                            Margin="0,0,0,10" />
+
                     <TextBlock x:Name="BubbleShapeCountText"
                                Foreground="#55514A"
                                Margin="0,0,0,2" />

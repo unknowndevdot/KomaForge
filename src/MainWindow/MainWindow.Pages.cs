@@ -177,6 +177,7 @@ public partial class MainWindow : Window
             CornerOffsets = PanelOffsetsToArray(bubble.CornerOffsets),
             WarpShape = bubble.WarpShape,
             WarpText = bubble.WarpText,
+            TextRotation = bubble.TextRotation,
             PivotX = bubble.PivotX,
             PivotY = bubble.PivotY,
             Tails = bubble.Tails
@@ -451,6 +452,7 @@ public partial class MainWindow : Window
         bubble.ShapeWidthVariation = bubbleData.ShapeWidthVariation;
         ApplyArrayToPanelOffsets(bubbleData.CornerOffsets, bubble.CornerOffsets);
         bubble.WarpShape = bubbleData.WarpShape;
+        bubble.TextRotation = bubbleData.TextRotation;
         bubble.WarpText = bubbleData.WarpText;
         bubble.PivotX = bubbleData.PivotX;
         bubble.PivotY = bubbleData.PivotY;
