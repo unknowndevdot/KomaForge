@@ -758,6 +758,13 @@
                             Value="0"
                             ValueChanged="BubbleShapeWidthVarSlider_ValueChanged"
                             Margin="0,0,0,2" />
+
+                    <CheckBox x:Name="BubbleLineFadeBothSidesCheckBox"
+                              Content="양쪽 페이드 (양 끝 투명)"
+                              Visibility="Collapsed"
+                              Checked="BubbleLineFadeBothSides_Changed"
+                              Unchecked="BubbleLineFadeBothSides_Changed"
+                              Margin="0,2,0,2" />
                     </StackPanel>
                     </Border>
 
@@ -821,6 +828,12 @@
                               IsChecked="False"
                               Checked="BubbleTailInwardCheckBox_Changed"
                               Unchecked="BubbleTailInwardCheckBox_Changed"
+                              Margin="0,0,0,8" />
+                    <CheckBox x:Name="BubbleThoughtTailCheckBox"
+                              Content="생각 꼬리 (원형 3개)"
+                              IsChecked="False"
+                              Checked="BubbleThoughtTail_Changed"
+                              Unchecked="BubbleThoughtTail_Changed"
                               Margin="0,0,0,12" />
 
                     <StackPanel Visibility="Collapsed">
@@ -843,7 +856,7 @@
                     <Slider x:Name="BubbleTailWidthSlider"
                             Minimum="8"
                             Maximum="80"
-                            Value="28"
+                            Value="15"
                             ValueChanged="BubbleTailSlider_ValueChanged"
                             Margin="0,4,0,14" />
                     <TextBlock Text="꼬리는 세 점(시작·중간·끝) 핸들로 곡선을 조절합니다. 주황 핸들(중간)을 끌면 곡선이 휩니다."

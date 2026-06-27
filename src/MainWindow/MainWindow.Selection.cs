@@ -80,6 +80,7 @@ public partial class MainWindow : Window
         BubbleTailYSlider.Value = Math.Clamp(tail.Y, BubbleTailYSlider.Minimum, BubbleTailYSlider.Maximum);
         BubbleTailWidthSlider.Value = Math.Clamp(tail.Width, BubbleTailWidthSlider.Minimum, BubbleTailWidthSlider.Maximum);
         BubbleTailInwardCheckBox.IsChecked = tail.TailInward; // '안으로 깎기'는 선택한 꼬리 개별 값.
+        BubbleThoughtTailCheckBox.IsChecked = tail.ThoughtTail; // '생각 꼬리'도 꼬리 개별 값.
         _isLoadingInspector = false;
         UpdateBubbleTailHandles(_selectedBubble);
         UpdateBubbleTailList(_selectedBubble);
@@ -202,9 +203,11 @@ public partial class MainWindow : Window
         BubbleShapeWidthVarText.Text = $"불규칙도(폭): {BubbleShapeWidthVarSlider.Value:0}";
         BubbleTextRotationSlider.Value = Math.Clamp(bubble.TextRotation, BubbleTextRotationSlider.Minimum, BubbleTextRotationSlider.Maximum);
         BubbleTextRotationText.Text = $"텍스트 회전: {BubbleTextRotationSlider.Value:0}°";
+        BubbleLineFadeBothSidesCheckBox.IsChecked = bubble.LineFadeBothSides;
         UpdateBubbleShapeOptionVisibility(bubble.Shape);
         // '안으로 깎기'는 선택한 꼬리 개별 값이므로, 선택된 꼬리가 있으면 그 값으로(없으면 해제).
         BubbleTailInwardCheckBox.IsChecked = _selectedBubbleTail?.TailInward == true;
+        BubbleThoughtTailCheckBox.IsChecked = _selectedBubbleTail?.ThoughtTail == true;
         BubbleShapeComboBox.SelectedIndex = bubble.Shape switch
         {
             BubbleShape.CloudExplosion => 1,

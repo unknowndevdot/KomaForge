@@ -174,6 +174,7 @@ public partial class MainWindow : Window
             ShapeStrength = bubble.ShapeStrength,
             ShapeIrregularity = bubble.ShapeIrregularity,
             ShapeWidthVariation = bubble.ShapeWidthVariation,
+            LineFadeBothSides = bubble.LineFadeBothSides,
             CornerOffsets = PanelOffsetsToArray(bubble.CornerOffsets),
             WarpShape = bubble.WarpShape,
             WarpText = bubble.WarpText,
@@ -190,7 +191,8 @@ public partial class MainWindow : Window
                     X = tail.X,
                     Y = tail.Y,
                     Width = tail.Width,
-                    TailInward = tail.TailInward
+                    TailInward = tail.TailInward,
+                    ThoughtTail = tail.ThoughtTail
                 })
                 .ToList()
         };
@@ -450,6 +452,7 @@ public partial class MainWindow : Window
         // 0/미지정(구버전)이면 기존 기본 흔들림 50으로 본다.
         bubble.ShapeIrregularity = bubbleData.ShapeIrregularity <= 0 ? 50 : bubbleData.ShapeIrregularity;
         bubble.ShapeWidthVariation = bubbleData.ShapeWidthVariation;
+        bubble.LineFadeBothSides = bubbleData.LineFadeBothSides;
         ApplyArrayToPanelOffsets(bubbleData.CornerOffsets, bubble.CornerOffsets);
         bubble.WarpShape = bubbleData.WarpShape;
         bubble.TextRotation = bubbleData.TextRotation;
@@ -467,7 +470,8 @@ public partial class MainWindow : Window
             Y = tail.Y,
             Width = tail.Width,
             // 구버전(말풍선 단위) 저장 호환: 말풍선 값이 켜져 있으면 모든 꼬리에 적용.
-            TailInward = tail.TailInward || bubbleData.TailInward
+            TailInward = tail.TailInward || bubbleData.TailInward,
+            ThoughtTail = tail.ThoughtTail
         }));
         UpdateBubbleGeometry(bubble);
 

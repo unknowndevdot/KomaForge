@@ -220,6 +220,8 @@ public sealed class SpeechBubbleData
     public double ShapeIrregularity { get; set; } = 50;
     // 폭 불규칙도(0~100, 구름/폭발 전용). 0/미지정이면 효과 없음.
     public double ShapeWidthVariation { get; set; }
+    // 속도선 양쪽 페이드(양 끝 모두 투명). 0/미지정(구버전)이면 한쪽만 페이드.
+    public bool LineFadeBothSides { get; set; }
     // 모서리 조절(사변형 일그러뜨림) 변위 TL,TR,BR,BL × X,Y = 8개. 0이면 일그러짐 없음.
     public double[] CornerOffsets { get; set; } = new double[8];
     // 모서리 조절을 도형/글자에 적용할지(개별).
@@ -245,6 +247,8 @@ public sealed class BubbleTailData
     public double Y { get; set; } = 130;
     public double Width { get; set; } = 28;
     public bool TailInward { get; set; }
+    // 생각 말풍선 꼬리(원 3개). 0/미지정(구버전)이면 일반 곡선 꼬리.
+    public bool ThoughtTail { get; set; }
 }
 
 public sealed class WindowSettings

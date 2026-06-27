@@ -252,6 +252,8 @@ public sealed class SpeechBubble
     public double ShapeIrregularity { get; set; } = 50;
     // 폭 불규칙도(0~100, 구름/폭발 전용): 상하좌우(변 중앙)를 바깥으로 넓혀 모서리가 패인 모양을 만든다. 0이면 효과 없음.
     public double ShapeWidthVariation { get; set; }
+    // 속도선: 각 선을 양쪽 끝 모두 투명하게 페이드할지(기본 OFF = 한쪽만 투명해짐).
+    public bool LineFadeBothSides { get; set; }
     // 말풍선 배경색(채움). 기본 흰색.
     public Brush BackgroundBrush { get; set; } = Brushes.White;
     // 말풍선 테두리(외곽선) 색. 기본 검정.
@@ -744,10 +746,12 @@ public sealed class BubbleTail
     public double Width { get; set; } = 28;
     // 이 꼬리를 본체에서 안으로 깎을지(개별 적용).
     public bool TailInward { get; set; }
+    // 생각 말풍선 꼬리: 곡선 대신 점점 작아지는 원 3개로 표시(개별 적용).
+    public bool ThoughtTail { get; set; }
 
     public override string ToString()
     {
-        return $"{(TailInward ? "↩ " : "")}꼬리 ({X:0}, {Y:0})";
+        return $"{(ThoughtTail ? "○ " : TailInward ? "↩ " : "")}꼬리 ({X:0}, {Y:0})";
     }
 }
 

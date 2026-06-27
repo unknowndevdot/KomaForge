@@ -281,17 +281,26 @@ public partial class MainWindow : Window
             return;
         }
 
-        var startX = _selectedBubble.Container.Width / 2;
-        var startY = _selectedBubble.Container.Height / 2;
+        // 새 꼬리는 본체 아래쪽 중앙에서 곧게 내려가는 '일자' 모양으로, 세 핸들(시작·중간·끝)을 넉넉히 띄워 배치한다.
+        // (기존엔 끝점이 슬라이더 값이라 위치가 들쭉날쭉하고 핸들이 붙어 나오는 경우가 많았다.)
+        var w = _selectedBubble.Container.Width;
+        var h = _selectedBubble.Container.Height;
+        // 여러 개 추가해도 서로의 핸들과 겹치지 않도록 중앙을 기준으로 번갈아 가로로 옮긴다(0, -30, +30, -60, …).
+        var n = _selectedBubble.Tails.Count;
+        var cx = w / 2 + ((n % 2 == 0) ? 1 : -1) * ((n + 1) / 2) * 30.0;
+        var startY = h * 0.72;                    // 본체 안(아래쪽)에서 시작 → 본체와 자연스럽게 합쳐짐
+        // 끝점은 '시작점↔하단 중앙 리사이즈 핸들(y=h)' 거리(= h - startY)만큼 그 핸들에서 더 내려간 위치.
+        var tipY = h + (h - startY);
         var tail = new BubbleTail
         {
-            StartX = startX,
+            StartX = cx,
             StartY = startY,
-            MidX = (startX + BubbleTailXSlider.Value) / 2,
-            MidY = (startY + BubbleTailYSlider.Value) / 2,
-            X = BubbleTailXSlider.Value,
-            Y = BubbleTailYSlider.Value,
-            Width = BubbleTailWidthSlider.Value
+            MidX = cx,
+            // 중간 핸들을 시작점과 하단 중앙 리사이즈 핸들(y=h) '사이'(중점)에 둔다 → 리사이즈 핸들과 겹치지 않게.
+            MidY = (startY + h) / 2,
+            X = cx,
+            Y = tipY,
+            Width = 15 // 꼬리 굵기 기본값.
         };
         _selectedBubble.Tails.Add(tail);
         SelectBubbleTail(tail);
@@ -554,6 +563,27 @@ public partial class MainWindow : Window
         UpdateBubbleTailList(_selectedBubble);
         BubbleTailListBox.SelectedItem = _selectedBubbleTail;
         UpdateStatus(_selectedBubbleTail.TailInward ? "이 꼬리를 안으로 깎습니다(시작↔끝 교체)." : "이 꼬리를 밖으로 냅니다.");
+    }
+
+    // 생각 꼬리(원형 3개) ON/OFF — 선택한 꼬리 개별 값.
+    private void BubbleThoughtTail_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_isLoadingInspector || _selectedBubble == null)
+        {
+            return;
+        }
+
+        if (_selectedBubbleTail == null)
+        {
+            UpdateStatus("생각 꼬리로 바꿀 꼬리를 먼저 선택하세요.");
+            return;
+        }
+
+        _selectedBubbleTail.ThoughtTail = BubbleThoughtTailCheckBox.IsChecked == true;
+        UpdateBubbleGeometry(_selectedBubble);
+        UpdateBubbleTailList(_selectedBubble);
+        BubbleTailListBox.SelectedItem = _selectedBubbleTail;
+        UpdateStatus(_selectedBubbleTail.ThoughtTail ? "이 꼬리를 생각 꼬리(원 3개)로 표시합니다." : "이 꼬리를 일반 곡선 꼬리로 표시합니다.");
     }
 
     private static readonly (string Name, string Hex)[] ColorPalette =
@@ -833,6 +863,12 @@ public partial class MainWindow : Window
         SetShapeOptionVisible(BubbleShapeCountText, BubbleShapeCountSlider, hasCountAndIrregularity);
         SetShapeOptionVisible(BubbleShapeIrregularityText, BubbleShapeIrregularitySlider, hasCountAndIrregularity);
         SetShapeOptionVisible(BubbleShapeWidthVarText, BubbleShapeWidthVarSlider, hasWidthVar);
+        // 양쪽 페이드는 속도선에서만 의미가 있다.
+        if (BubbleLineFadeBothSidesCheckBox != null)
+        {
+            BubbleLineFadeBothSidesCheckBox.Visibility =
+                shape == BubbleShape.EffectLines ? Visibility.Visible : Visibility.Collapsed;
+        }
         // 글자 회전은 선효과(속도선·집중선)를 뺀 모든 말풍선에서 보여 준다.
         SetShapeOptionVisible(BubbleTextRotationText, BubbleTextRotationSlider, !IsLineEffectShape(shape));
 
@@ -885,6 +921,18 @@ public partial class MainWindow : Window
         }
 
         _selectedBubble.TextRotation = BubbleTextRotationSlider.Value;
+        UpdateBubbleGeometry(_selectedBubble);
+    }
+
+    // 속도선 양쪽 페이드 ON/OFF.
+    private void BubbleLineFadeBothSides_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_isLoadingInspector || _selectedBubble == null)
+        {
+            return;
+        }
+
+        _selectedBubble.LineFadeBothSides = BubbleLineFadeBothSidesCheckBox.IsChecked == true;
         UpdateBubbleGeometry(_selectedBubble);
     }
 

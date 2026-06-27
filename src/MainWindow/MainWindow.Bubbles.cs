@@ -231,7 +231,7 @@ public partial class MainWindow : Window
             var warpSig = bubble.WarpShape
                 ? string.Join(",", bubble.CornerOffsets.Select(p => $"{p.X:F1}:{p.Y:F1}"))
                 : "off";
-            var signature = $"{bubble.Shape}|{bubble.Container.Width:F1}|{bubble.Container.Height:F1}|{bubble.ShapeCount}|{bubble.ShapeStrength:F1}|{bubble.ShapeIrregularity:F1}|{ToHex(bubble.TextBlock.Fill)}|{warpSig}";
+            var signature = $"{bubble.Shape}|{bubble.Container.Width:F1}|{bubble.Container.Height:F1}|{bubble.ShapeCount}|{bubble.ShapeStrength:F1}|{bubble.ShapeIrregularity:F1}|{ToHex(bubble.TextBlock.Fill)}|{warpSig}|{bubble.LineFadeBothSides}";
             if (signature == bubble.LineHostSignature)
             {
                 return; // 위치만 바뀐 경우: 로컬 좌표라 그대로 따라오므로 재생성 불필요.
@@ -273,7 +273,8 @@ public partial class MainWindow : Window
         foreach (var tail in bubble.Tails)
         {
             var tailGeometry = CreateTailGeometry(tail);
-            var tailMode = tail.TailInward ? GeometryCombineMode.Exclude : GeometryCombineMode.Union;
+            // 생각 꼬리(원 3개)는 항상 합친다(안으로 깎기는 곡선 꼬리에만 의미).
+            var tailMode = (tail.TailInward && !tail.ThoughtTail) ? GeometryCombineMode.Exclude : GeometryCombineMode.Union;
             shape = Geometry.Combine(shape, tailGeometry, tailMode, null);
         }
 
@@ -348,6 +349,13 @@ public partial class MainWindow : Window
         var start = new Point(tail.StartX, tail.StartY);
         var mid = new Point(tail.MidX, tail.MidY);
         var end = new Point(tail.X, tail.Y);
+
+        // 생각 말풍선 꼬리: 곡선 대신 시작→(중간 제어점)→끝 곡선을 따라 점점 작아지는 원 3개.
+        if (tail.ThoughtTail)
+        {
+            return CreateThoughtTailGeometry(start, mid, end, tail.Width);
+        }
+
         var direction = end - start;
 
         if (direction.Length < 1)
@@ -370,6 +378,32 @@ public partial class MainWindow : Window
         figure.Segments.Add(new QuadraticBezierSegment(controlA, end, true));
         figure.Segments.Add(new QuadraticBezierSegment(controlB, startB, true));
         return new PathGeometry(new[] { figure });
+    }
+
+    // 생각 말풍선 꼬리: 시작→(중간 제어점)→끝 이차 베지어 곡선을 따라 점점 작아지는 원 3개(본체 쪽이 가장 큼).
+    private static Geometry CreateThoughtTailGeometry(Point start, Point mid, Point end, double width)
+    {
+        var baseR = Math.Max(6.0, width * 0.9); // 가장 큰 원 반지름(굵기 기준).
+        var t = new[] { 0.4, 0.7, 1.0 };        // 시작점은 본체 안일 수 있어 살짝 바깥(0.4)부터 끝(1.0)까지.
+        var rf = new[] { 1.0, 0.66, 0.42 };     // 점점 작아지는 반지름 비율.
+
+        var group = new GeometryGroup();
+        for (var i = 0; i < 3; i++)
+        {
+            var c = QuadBezierPoint(start, mid, end, t[i]); // 중간 핸들을 제어점으로 한 곡선 위 위치.
+            var r = baseR * rf[i];
+            group.Children.Add(new EllipseGeometry(c, r, r));
+        }
+        return group;
+    }
+
+    // 이차 베지어 곡선 위 점: (1-t)²·P0 + 2(1-t)t·P1 + t²·P2.
+    private static Point QuadBezierPoint(Point p0, Point p1, Point p2, double t)
+    {
+        var u = 1 - t;
+        return new Point(
+            u * u * p0.X + 2 * u * t * p1.X + t * t * p2.X,
+            u * u * p0.Y + 2 * u * t * p1.Y + t * t * p2.Y);
     }
 
     private static Thumb CreateTailHandle(Color? color = null)

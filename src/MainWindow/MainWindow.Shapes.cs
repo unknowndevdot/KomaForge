@@ -130,6 +130,26 @@ public partial class MainWindow : Window
         return brush;
     }
 
+    // 양쪽 끝을 모두 투명하게(가운데 불투명) 페이드하는 브러시 — 속도선 '양쪽 페이드' 옵션용.
+    private static Brush CreateBothSidesFadeBrush(Brush lineBrush, Point start, Point end)
+    {
+        var color = (lineBrush as SolidColorBrush)?.Color ?? Colors.Black;
+        var clear = Color.FromArgb(0, color.R, color.G, color.B);
+        var solid = Color.FromArgb(255, color.R, color.G, color.B);
+        var brush = new LinearGradientBrush
+        {
+            MappingMode = BrushMappingMode.Absolute,
+            StartPoint = start,
+            EndPoint = end
+        };
+        brush.GradientStops.Add(new GradientStop(clear, 0.0));   // 한쪽 끝: 투명
+        brush.GradientStops.Add(new GradientStop(solid, 0.3));   // 안쪽: 불투명
+        brush.GradientStops.Add(new GradientStop(solid, 0.7));   // 안쪽: 불투명
+        brush.GradientStops.Add(new GradientStop(clear, 1.0));   // 반대쪽 끝: 투명
+        brush.Freeze();
+        return brush;
+    }
+
     // 집중선: 중앙을 향하는 방사형 직선들. 돌기 ×10.
     // 선의 기하(시작/끝점)는 강도와 무관하게 고정이고, 강도는 페이드(중앙의 투명 반지름)만 키운다.
     // 투명 경계는 박스 비율과 무관한 정원, 선 끝은 사각형 가장자리.
@@ -230,7 +250,7 @@ public partial class MainWindow : Window
     // 속도선(효과선): 한 방향으로 직진하는 일직선 평행선들. 강도 0~100 → 방향 0~360도.
     // 각 선의 길이가 제각각이고 선 사이 간격도 일정하지 않다. 돌기 ×10.
     // (베이스 = -d쪽 시작점, 팁 = 진행 방향 끝점) 목록을 만든다.
-    private static List<(Point Base, Point Tip)> EffectLineEndpoints(double width, double height, int count, double strength, double irregularity)
+    private static List<(Point Base, Point Tip)> EffectLineEndpoints(double width, double height, int count, double strength, double irregularity, bool centered = false)
     {
         var t = Math.Clamp(strength, 0, 100) / 100.0;
         var m = IrregularityMul(irregularity);
@@ -256,8 +276,9 @@ public partial class MainWindow : Window
             var raw = 0.30 + 0.70 * Pseudo(i * 5.3 + 0.9);
             var lenFrac = Math.Clamp(1.0 + (raw - 1.0) * m, 0.1, 1.5);
             var length = span * lenFrac;
-            var a0 = -half;
-            var a1 = -half + length;
+            // 양쪽 페이드(centered)면 각 선을 중앙 기준 ±length/2로 배치(중앙 정렬·좌우 대칭). 아니면 한쪽 끝(-half)에서 시작.
+            var a0 = centered ? -length / 2.0 : -half;
+            var a1 = centered ? length / 2.0 : -half + length;
             var baseP = new Point(cx + dx * a0 + px * perp, cy + dy * a0 + py * perp);
             var tip = new Point(cx + dx * a1 + px * perp, cy + dy * a1 + py * perp);
             result.Add((baseP, tip));
@@ -296,7 +317,7 @@ public partial class MainWindow : Window
         var warp = bubble.WarpShape && HasCornerWarp(bubble.CornerOffsets);
         var o = bubble.CornerOffsets;
 
-        foreach (var (baseP, tip) in EffectLineEndpoints(w, h, bubble.ShapeCount, bubble.ShapeStrength, bubble.ShapeIrregularity))
+        foreach (var (baseP, tip) in EffectLineEndpoints(w, h, bubble.ShapeCount, bubble.ShapeStrength, bubble.ShapeIrregularity, bubble.LineFadeBothSides))
         {
             // 베이스→팁 선분을 박스로 클립해 보이는 구간만 남긴다(c0=베이스쪽, c1=팁쪽).
             if (!ClipSegmentToBox(baseP, tip, w, h, out var c0, out var c1))
@@ -310,8 +331,10 @@ public partial class MainWindow : Window
             var path = new System.Windows.Shapes.Path
             {
                 Data = new LineGeometry(a, b),
-                // 팁(c1) 투명 → 베이스(c0) 불투명. 보이는 구간 기준이라 선마다 자기 시작점부터 페이드된다.
-                Stroke = CreateDirectionFadeBrush(lineColor, b, a),
+                // 양쪽 페이드 ON이면 양 끝 모두 투명(가운데 불투명), OFF면 팁(b) 투명 → 베이스(a) 불투명.
+                Stroke = bubble.LineFadeBothSides
+                    ? CreateBothSidesFadeBrush(lineColor, a, b)
+                    : CreateDirectionFadeBrush(lineColor, b, a),
                 StrokeThickness = 1.6,
                 IsHitTestVisible = false
             };
